@@ -1,3 +1,12 @@
 # Ignored folders
 Doback-Data/
 LiDAR-Maps/
+
+# Python caches
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Output artifacts
+output/
