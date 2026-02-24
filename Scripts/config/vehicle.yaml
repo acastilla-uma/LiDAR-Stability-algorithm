@@ -1,0 +1,47 @@
+# Vehicle Configuration for Doback Scooter
+# Physical parameters for rollover stability analysis
+
+vehicle:
+  name: "DOBACK_Heavy_Scooter"
+  model: "DOBACK024"
+  
+  # Mass properties
+  mass_kg: 18000  # Total mass in kilograms
+  
+  # Geometry
+  track_width_m: 2.480  # Ancho de vía (S) - distance between wheels
+  cg_height_m: 1.850    # Height of center of gravity (Hg)
+  wheelbase_m: 3.5      # Estimated wheelbase (to be validated)
+  
+  # Inertia
+  roll_inertia_kg_m2: 89300  # Roll moment of inertia (Ixx)
+  
+  # Suspension
+  suspension_type: "rigid"  # Can be: rigid, semi-active, active
+  
+# Stability thresholds
+stability:
+  critical_angle_deg: 33.8  # Rollover threshold φc = arctan(S / (2*Hg))
+  critical_angle_rad: 0.5899  # In radians
+  si_safe_threshold: 0.4    # SI < this = Safe for autonomous nav
+  si_warning_threshold: 0.7   # SI in [0.7, 0.85] = Caution
+  si_danger_threshold: 0.85   # SI >= this = Danger/Rollover risk
+
+# Sensor configuration (for reference)
+sensors:
+  gps_freq_hz: 1.0
+  imu_freq_hz: 10.0  # Actual measured frequency (not 50 Hz as initially assumed)
+  imu_model: "MPU9250_or_similar"
+
+# Coordinate reference system
+crs:
+  epsg: 25830  # ETRS89 / UTM Zone 30N
+  description: "UTM Zone 30N (Madrid region)"
+
+# Data paths (relative to root)
+data_paths:
+  gps_dir: "Doback-Data/GPS"
+  imu_dir: "Doback-Data/Stability"
+  lidar_cnig: "LiDAR-Maps/cnig"
+  lidar_rasters: "LiDAR-Maps/geo-mad"
+  output_dir: "output"
