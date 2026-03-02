@@ -18,8 +18,8 @@ def build_ground_truth(imu_df: pd.DataFrame, engine) -> pd.DataFrame:
     Build ground truth dataset from IMU data and physics engine.
     
     Args:
-        imu_df: DataFrame from parse_imu() with columns including:
-                [t_us, roll_deg, pitch_deg, si_mcu, ...]
+        imu_df: DataFrame with columns including:
+            [t_us, roll_deg, pitch_deg, si_mcu, ...]
         engine: StabilityEngine instance
         
     Returns:

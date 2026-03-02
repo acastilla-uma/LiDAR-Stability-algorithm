@@ -2,7 +2,7 @@
 End-to-end EKF Execution Script
 
 Usage:
-    python scripts/ekf/run_ekf.py <gps_file> <imu_file> [--output <path>]
+    python scripts/ekf/run_ekf.py <processed_csv> [--output <path>]
 """
 
 import argparse
@@ -15,9 +15,7 @@ import sys
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from parsers import parse_gps, parse_imu
 from ekf.ekf_fusion import ExtendedKalmanFilter
-from ekf.time_sync import calculate_imu_absolute_timestamp
 import pyproj
 
 logger = logging.getLogger(__name__)
@@ -43,13 +41,12 @@ def gps_to_utm(lat, lon, zone=30):
     return x, y
 
 
-def run_ekf_session(gps_file: str, imu_file: str, output_dir: str = None) -> pd.DataFrame:
+def run_ekf_session(processed_csv: str, output_dir: str = None) -> pd.DataFrame:
     """
-    Run EKF on a GPS+IMU session.
+    Run EKF on a processed GPS+IMU dataset.
     
     Args:
-        gps_file: Path to GPS data file
-        imu_file: Path to IMU data file
+        processed_csv: Path to processed CSV (matched GPS+IMU)
         output_dir: Optional output directory for results
         
     Returns:
@@ -57,15 +54,24 @@ def run_ekf_session(gps_file: str, imu_file: str, output_dir: str = None) -> pd.
     """
     logger.info("=== EKF Session Processing ===")
     
-    # Parse data
-    logger.info(f"Parsing GPS: {gps_file}")
-    gps_df = parse_gps(gps_file)
-    
-    logger.info(f"Parsing IMU: {imu_file}")
-    imu_df = parse_imu(imu_file)
-    
-    if gps_df.empty or imu_df.empty:
-        logger.error("One or both dataframes are empty")
+    # Load processed data
+    logger.info(f"Loading processed CSV: {processed_csv}")
+    df = pd.read_csv(processed_csv)
+
+    if df.empty:
+        logger.error("Processed CSV is empty")
+        return pd.DataFrame()
+
+    if "timestamp" not in df.columns:
+        logger.error("Processed CSV missing 'timestamp' column")
+        return pd.DataFrame()
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"])
+    df = df.sort_values("timestamp")
+
+    if df.empty:
+        logger.error("No valid timestamps in processed CSV")
         return pd.DataFrame()
     
     # Initialize EKF
@@ -75,98 +81,65 @@ def run_ekf_session(gps_file: str, imu_file: str, output_dir: str = None) -> pd.
     ekf.set_process_noise([0.1, 0.1, 0.5, 0.1])  # Process noise for [x, y, v, psi]
     ekf.set_measurement_noise([2.0, 2.0, 1.0])   # Measurement noise for [x, y, v]
     
-    # Get session timing reference from GPS
-    session_start_utc = gps_df['timestamp_utc'].min()
-    
     # Convert GPS to UTM
-    gps_df['x_utm'], gps_df['y_utm'] = zip(*[
-        gps_to_utm(lat, lon) for lat, lon in zip(gps_df['lat'], gps_df['lon'])
-    ])
-    
-    # Convert IMU timestamps to absolute
-    imu_df['timestamp_utc'] = calculate_imu_absolute_timestamp(imu_df, session_start_utc)
-    
-    # Merge timelines
-    logger.info("Merging GPS and IMU timelines...")
-    all_timestamps = pd.concat([
-        gps_df['timestamp_utc'],
-        imu_df['timestamp_utc']
-    ]).drop_duplicates().sort_values()
-    
+    if "lat" in df.columns and "lon" in df.columns:
+        df["x_utm"], df["y_utm"] = zip(*[
+            gps_to_utm(lat, lon) for lat, lon in zip(df["lat"], df["lon"])
+        ])
+    else:
+        logger.error("Processed CSV missing lat/lon columns")
+        return pd.DataFrame()
+
     trajectory = []
-    gps_idx = 0
-    imu_idx = 0
-    
-    for t in all_timestamps:
-        # Determine if this is a GPS update or IMU-only step
-        is_gps = t in gps_df['timestamp_utc'].values
-        
-        if is_gps and gps_idx < len(gps_df):
-            # GPS update available
-            gps_row = gps_df[gps_df['timestamp_utc'] == t].iloc[0]
-            
-            # Compute acceleration from GPS velocity change (rough estimate)
-            if len(trajectory) > 0:
-                dt = (t - trajectory[-1]['timestamp_utc']).total_seconds()
-                if dt > 0:
-                    dv = gps_row['speed_kmh'] / 3.6 - trajectory[-1]['v']
-                    ax = dv / dt
-                else:
-                    ax = 0
-            else:
-                ax = 0
-            
-            # Predict step with IMU data (dummy for now)
-            ekf.predict(ax, 0, 0, 1.0)
-            
-            # Update step with GPS
-            ekf.update(
-                gps_row['x_utm'],
-                gps_row['y_utm'],
-                gps_row['speed_kmh'] / 3.6,
-                hdop=gps_row['hdop']
-            )
-            
-            state = ekf.get_state()
-            trajectory.append({
-                'timestamp_utc': t,
-                'x_utm': state[0],
-                'y_utm': state[1],
-                'v': state[2],
-                'yaw': state[3],
-                'source': 'gps'
-            })
-            gps_idx += 1
+    prev_time = None
+
+    for _, row in df.iterrows():
+        t = row["timestamp"]
+        if pd.isna(t):
+            continue
+
+        # Time step
+        if prev_time is not None:
+            dt = (t - prev_time).total_seconds()
+            if dt <= 0:
+                dt = 0.1
         else:
-            # IMU-only step (high frequency)
-            imu_row = imu_df[imu_df['timestamp_utc'] == t]
-            if len(imu_row) > 0:
-                imu_row = imu_row.iloc[0]
-                
-                # Convert IMU accelerations (assuming raw LSB, ~1g = 1000)
-                ax = imu_row['ax'] / 1000.0 * 9.81
-                ay = imu_row['ay'] / 1000.0 * 9.81
-                psi_dot = np.radians(imu_row['gz'])  # Gyro Z to rad/s (assume degree/s input)
-                
-                # Time step
-                if len(trajectory) > 0:
-                    dt = (t - trajectory[-1]['timestamp_utc']).total_seconds()
-                else:
-                    dt = 0.1
-                
-                # Predict only
-                ekf.predict(ax, ay, psi_dot, dt)
-                
-                state = ekf.get_state()
-                trajectory.append({
-                    'timestamp_utc': t,
-                    'x_utm': state[0],
-                    'y_utm': state[1],
-                    'v': state[2],
-                    'yaw': state[3],
-                    'source': 'imu'
-                })
-                imu_idx += 1
+            dt = 0.1
+
+        # IMU inputs (fallback to 0 if missing)
+        ax = (row.get("ax", 0.0) / 1000.0) * 9.81 if not pd.isna(row.get("ax", np.nan)) else 0.0
+        ay = (row.get("ay", 0.0) / 1000.0) * 9.81 if not pd.isna(row.get("ay", np.nan)) else 0.0
+        psi_dot = np.radians(row.get("gz", 0.0)) if not pd.isna(row.get("gz", np.nan)) else 0.0
+
+        # Predict step
+        ekf.predict(ax, ay, psi_dot, dt)
+
+        # Update step with GPS data
+        speed_kmh = row.get("speed_kmh", 0.0)
+        if pd.isna(speed_kmh):
+            speed_kmh = 0.0
+        hdop = row.get("hdop", 1.0)
+        if pd.isna(hdop):
+            hdop = 1.0
+
+        ekf.update(
+            row["x_utm"],
+            row["y_utm"],
+            speed_kmh / 3.6,
+            hdop=hdop,
+        )
+
+        state = ekf.get_state()
+        trajectory.append({
+            "timestamp_utc": t,
+            "x_utm": state[0],
+            "y_utm": state[1],
+            "v": state[2],
+            "yaw": state[3],
+            "source": "merged",
+        })
+
+        prev_time = t
     
     trajectory_df = pd.DataFrame(trajectory)
     
@@ -187,14 +160,13 @@ def run_ekf_session(gps_file: str, imu_file: str, output_dir: str = None) -> pd.
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Run EKF on GPS+IMU data')
-    parser.add_argument('gps_file', help='GPS data file')
-    parser.add_argument('imu_file', help='IMU data file')
+    parser = argparse.ArgumentParser(description='Run EKF on processed GPS+IMU CSV')
+    parser.add_argument('processed_csv', help='Processed CSV file with GPS+IMU data')
     parser.add_argument('--output', '-o', default='output', help='Output directory')
     
     args = parser.parse_args()
     
-    trajectory = run_ekf_session(args.gps_file, args.imu_file, args.output)
+    trajectory = run_ekf_session(args.processed_csv, args.output)
     
     if not trajectory.empty:
         logger.info("✓ EKF completed successfully")

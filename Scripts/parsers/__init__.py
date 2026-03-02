@@ -1,6 +1,6 @@
-"""Parsers module for DOBACK data files."""
+"""Batch processing and visualization helpers for DOBACK data."""
 
-from .gps_parser import parse_gps
-from .imu_parser import parse_imu
+from . import batch_processor
+from . import route_visualizer
 
-__all__ = ['parse_gps', 'parse_imu']
+__all__ = ["batch_processor", "route_visualizer"]

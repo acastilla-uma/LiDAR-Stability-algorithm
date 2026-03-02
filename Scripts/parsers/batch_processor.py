@@ -369,7 +369,7 @@ def build_pairs(gps_dir, stab_dir):
     return pairs
 
 
-def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000):
+def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000, map_matching=False):
     gps_dir = data_dir / "GPS"
     stab_dir = data_dir / "Stability"
 
@@ -380,15 +380,40 @@ def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000):
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Import map_matcher only if needed
+    if map_matching:
+        try:
+            try:
+                from . import map_matcher
+            except ImportError:
+                # When run as script directly (not as module)
+                import map_matcher
+            print("[OK] Map-matching enabled - GPS will be corrected to road network")
+        except ImportError:
+            print("[WARN] map_matcher module not found. Proceeding without map-matching.")
+            map_matching = False
+
     report_lines = []
     report_lines.append("DOBACK ROUTE PROCESSING REPORT")
     report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     report_lines.append(f"Max gap for splitting: {max_gap_meters}m")
+    if map_matching:
+        report_lines.append("Map-matching: ENABLED (GPS corrected to road network)")
     report_lines.append("")
 
     for key, gps_path, stab_path in pairs:
         gps_df = parse_gps_file(gps_path)
         stab_df = parse_stability_file(stab_path)
+
+        # Apply map-matching if enabled  
+        if map_matching and gps_df is not None and not gps_df.empty:
+            try:
+                gps_df = map_matcher.apply_map_matching(gps_df)
+                # Use corrected coordinates in matching
+                gps_df["lat"] = gps_df.get("lat_corrected", gps_df["lat"])
+                gps_df["lon"] = gps_df.get("lon_corrected", gps_df["lon"])
+            except Exception as e:
+                print(f"⚠ Map-matching failed for {key}: {e}. Using original GPS.")
 
         # Split GPS data into segments based on large gaps
         gps_segments = split_into_segments(gps_df, max_gap_meters)
@@ -403,6 +428,11 @@ def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000):
             if merged is None or merged.empty:
                 report_lines.append(f"{key}: no matched rows")
                 continue
+            
+            # Skip segments with too few points
+            if len(merged) < 10:
+                report_lines.append(f"{key}: solo {len(merged)} puntos (descartado, mínimo 10)")
+                continue
 
             output_file = output_dir / f"{key}.csv"
             merged.to_csv(output_file, index=False)
@@ -410,9 +440,15 @@ def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000):
         else:
             # Multiple segments due to gaps
             segment_count = 0
+            skipped_count = 0
             for seg_idx, gps_segment in enumerate(gps_segments, 1):
                 merged = match_by_timestamp(gps_segment, stab_df, tolerance_seconds)
                 if merged is None or merged.empty:
+                    continue
+                
+                # Skip segments with too few points
+                if len(merged) < 10:
+                    skipped_count += 1
                     continue
                 
                 segment_count += 1
@@ -423,7 +459,8 @@ def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000):
             if segment_count == 0:
                 report_lines.append(f"{key}: {len(gps_segments)} segments found but no matched rows")
             else:
-                report_lines.append(f"{key}: {len(gps_segments)} segments total, {segment_count} with matched data")
+                skip_msg = f", {skipped_count} descartados (<10 pts)" if skipped_count > 0 else ""
+                report_lines.append(f"{key}: {len(gps_segments)} segments total, {segment_count} guardados{skip_msg}")
 
     report_path = output_dir / "processing_report.txt"
     report_path.write_text("\n".join(report_lines), encoding="utf-8")
@@ -454,6 +491,11 @@ def main():
         default=100,
         help="Maximum gap distance (meters) before splitting into separate routes",
     )
+    parser.add_argument(
+        "--map-matching",
+        action="store_true",
+        help="Enable GPS map-matching to align with road network (requires osmnx)",
+    )
 
     args = parser.parse_args()
 
@@ -461,7 +503,7 @@ def main():
     data_dir = (project_root / args.data_dir).resolve()
     output_dir = (project_root / args.output_dir).resolve()
 
-    process_all(data_dir, output_dir, args.tolerance_seconds, args.max_gap_meters)
+    process_all(data_dir, output_dir, args.tolerance_seconds, args.max_gap_meters, args.map_matching)
 
 
 if __name__ == "__main__":

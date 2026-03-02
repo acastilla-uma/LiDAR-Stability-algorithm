@@ -16,6 +16,7 @@ sys.path.insert(0, str(scripts_path))
 
 from ekf.ekf_fusion import ExtendedKalmanFilter
 from ekf.time_sync import calculate_imu_absolute_timestamp, merge_gps_imu
+from ekf import ekf_batch_processor
 
 
 class TestEKFStationar:
@@ -167,6 +168,49 @@ class TestEKFPipeline:
         from ekf.ekf_fusion import ExtendedKalmanFilter
         ekf = ExtendedKalmanFilter()
         assert ekf is not None
+
+
+class TestEKFBatchProcessor:
+    """Tests for Sprint 2 temporal matching and segmentation."""
+
+    def test_match_gps_stability(self):
+        """Matching should align GPS and stability on stability timeline."""
+        gps_times = pd.date_range("2026-02-26 10:00:00", periods=3, freq="2s")
+        gps_df = pd.DataFrame({
+            "timestamp": gps_times,
+            "lat": [40.0, 40.0001, 40.0002],
+            "lon": [-3.7, -3.7001, -3.7002],
+        })
+
+        stab_times = pd.date_range("2026-02-26 10:00:00", periods=6, freq="1s")
+        stab_df = pd.DataFrame({
+            "timestamp": stab_times,
+            "ax": np.zeros(6),
+            "ay": np.zeros(6),
+            "gz": np.zeros(6),
+            "si": np.linspace(0.2, 0.3, 6),
+        })
+
+        matched = ekf_batch_processor.match_gps_stability(gps_df, stab_df, tolerance_seconds=1.0)
+
+        assert not matched.empty
+        assert len(matched) == len(stab_df)
+        assert "lat" in matched.columns
+        assert "lon" in matched.columns
+
+    def test_split_segments(self):
+        """Segments should split on large gaps and enforce min size."""
+        df = pd.DataFrame({
+            "x_utm": [0, 1, 2, 3, 4, 2000, 2001, 2002, 2003, 2004, 2005],
+            "y_utm": [0] * 11,
+            "timestamp": pd.date_range("2026-02-26 10:00:00", periods=11, freq="1s"),
+        })
+
+        segments = ekf_batch_processor.split_segments(df, max_gap_meters=1000, min_points=5)
+
+        assert len(segments) == 2
+        assert len(segments[0]) == 5
+        assert len(segments[1]) == 6
 
 
 if __name__ == '__main__':

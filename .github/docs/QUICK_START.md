@@ -2,11 +2,43 @@
 
 **LiDAR-Stability Algorithm - PIML Traversability Mapping**
 
-Implementación Sprints 1-2 COMPLETADOS. Puedes empezar a usar los módulos inmediatamente.
+Implementación Sprints 1-3 COMPLETADOS. Puedes empezar a usar los módulos inmediatamente.
 
 ---
 
 ## ⚡ 5-Minuto Quick Start
+
+### 0. Preparación de Datos (Sprint 1 - Batch Processing)
+
+**Procesar datos crudos GPS + estabilidad:**
+```bash
+# Procesar todos los pares GPS/ESTABILIDAD en Doback-Data/
+python Scripts/parsers/batch_processor.py
+
+# Resultado: CSVs limpios en Doback-Data/processed data/
+# - DOBACK###_YYYYMMDD.csv (rutas continuas)
+# - DOBACK###_YYYYMMDD_segN.csv (rutas segmentadas)
+```
+
+**Visualizar rutas procesadas:**
+```bash
+# Visualizar todos los segmentos de una ruta específica
+python Scripts/parsers/route_visualizer.py \
+  "Doback-Data/processed data/DOBACK024_20251005"
+
+# Se abre automáticamente mapa interactivo en navegador
+# Colores: Rojo (SI=0, inestable) → Verde (SI=1, estable)
+```
+
+**¿Qué hace el Batch Processing de Sprint 1?**
+- ✅ Matchea GPS (1 Hz) con estabilidad (10 Hz) por timestamp
+- ✅ Filtra anomalías (saltos GPS >100m, puntos aislados)
+- ✅ Divide rutas automáticamente en segmentos (gaps >1000m)
+- ✅ Genera CSVs limpios listos para análisis
+
+📚 **Más info:** Ver `Scripts/parsers/README_batch_processing.md` y `SPRINT_1_BATCH_PROCESSING.md`
+
+---
 
 ### 1. Verificar Instalación
 
@@ -18,24 +50,13 @@ pip install -r requirements.txt  # Ya ejecutado, pero verifica
 python -c "import numpy, pandas, scipy; print('✓ OK')"
 ```
 
-### 2. Parsear Datos Brutos
+### 2. Procesamiento Batch (Sprint 1)
 
-**GPS:**
-```python
-from scripts.parsers import parse_gps
+```bash
+# Procesa todos los logs y genera CSVs limpios
+python Scripts/parsers/batch_processor.py
 
-gps_df = parse_gps('Doback-Data/GPS/GPS_DOBACK027_20250814_0.txt')
-print(f"Parsed {len(gps_df)} GPS records")
-print(gps_df[['timestamp_utc', 'lat', 'lon', 'speed_kmh']].head())
-```
-
-**IMU/Estabilidad:**
-```python
-from scripts.parsers import parse_imu
-
-imu_df = parse_imu('Doback-Data/Stability/ESTABILIDAD_DOBACK024_20250825_188.txt')
-print(f"Parsed {len(imu_df)} IMU records @ ~10 Hz")
-print(imu_df[['roll_deg', 'pitch_deg', 'si_mcu']].head())
+# Resultado: Doback-Data/processed data/*.csv
 ```
 
 ### 3. Calcular Estabilidad Física
@@ -60,16 +81,23 @@ print(f"SI at {roll_deg}° roll: {si:.3f}")
 ### 4. Generar Ground Truth
 
 ```python
-from scripts.parsers import parse_imu
+import pandas as pd
 from scripts.physics import StabilityEngine
 from scripts.pipeline import build_ground_truth, export_ground_truth
 
-# Parsear datos reales
-imu_df = parse_imu('Doback-Data/Stability/ESTABILIDAD_DOBACK024_20250825_188.txt')
+# Usa un CSV procesado que incluya roll/pitch y SI
+route_df = pd.read_csv('Doback-Data/processed data/DOBACK024_20251005_seg1.csv')
+route_df = route_df.rename(columns={
+  'roll': 'roll_deg',
+  'pitch': 'pitch_deg',
+  'si': 'si_mcu',
+  'timeantwifi': 't_us'
+})
+
 engine = StabilityEngine('scripts/config/vehicle.yaml')
 
 # Construir ground truth con ΔSI como target
-gt_df = build_ground_truth(imu_df, engine)
+gt_df = build_ground_truth(route_df, engine)
 print(f"Ground truth: {len(gt_df)} samples")
 print(gt_df[['si_real', 'si_static', 'delta_si']].describe())
 
@@ -77,16 +105,27 @@ print(gt_df[['si_real', 'si_static', 'delta_si']].describe())
 export_ground_truth(gt_df, 'output/ground_truth.csv')
 ```
 
-### 5. Ejecutar EKF Sensor Fusion
+### 5. Ejecutar EKF Batch (Sprint 2)
 
 ```bash
-# Fusionar GPS (1 Hz) + IMU (10 Hz) en trayectoria continua
-python scripts/ekf/run_ekf.py \
-  Doback-Data/GPS/GPS_DOBACK027_20250814_0.txt \
-  Doback-Data/Stability/ESTABILIDAD_DOBACK024_20250825_188.txt \
-  --output output/
+# Procesar logs crudos con EKF y generar CSVs densificados
+python Scripts/ekf/ekf_batch_processor.py \
+  --tolerance-seconds 1.0 \
+  --max-gap-meters 1000
 
-# Output: output/ekf_trajectory.csv
+# Output: Doback-Data/processed data/*_ekf_seg*.csv
+# Nomenclatura compatible con route_visualizer para visualización
+```
+
+### 6. Visualizar rutas EKF
+
+```bash
+# Visualizar segmentos EKF (usa el mismo visualizador que Sprint 1)
+python Scripts/parsers/route_visualizer.py \
+  "Doback-Data/processed data/DOBACK023_20250930_ekf" \
+  --no-browser
+
+# Output: output/mapa_ruta_si.html
 ```
 
 ---
@@ -94,7 +133,7 @@ python scripts/ekf/run_ekf.py \
 ## 🧪 Ejecutar Tests
 
 ```bash
-# Sprint 1: Parsers + Physics
+# Sprint 1: Batch Processing + Physics
 pytest scripts/tests/test_sprint1.py -v
 
 # Sprint 2: EKF
@@ -107,7 +146,7 @@ pytest scripts/tests/test_sprint1.py scripts/tests/test_sprint2.py -v
 pytest --collect-only -q scripts/tests/
 ```
 
-**Esperado:** 25/25 tests PASSED ✅
+**Esperado:** 27/27 tests PASSED ✅
 
 ---
 
@@ -209,12 +248,10 @@ vehicle:
 
 ## 🎯 API Rápida
 
-### Parsers
-```python
-from scripts.parsers import parse_gps, parse_imu
-
-gps_df = parse_gps(filepath)              # → DataFrame [timestamp_utc, lat, lon, ...]
-imu_df = parse_imu(filepath)              # → DataFrame [ax, ay, az, roll_deg, ...]
+### Batch Processing
+```bash
+python Scripts/parsers/batch_processor.py
+python Scripts/parsers/route_visualizer.py "Doback-Data/processed data/DOBACK024_20251005"
 ```
 
 ### Physics
@@ -260,7 +297,7 @@ state = ekf.get_state()  # [x, y, v, psi]
 ```bash
 # Asegúrate de estar en el directorio raíz del proyecto
 cd LiDAR-Stability-algorithm
-python -c "import sys; sys.path.insert(0, 'scripts'); from parsers import parse_gps"
+python -c "import sys; sys.path.insert(0, 'scripts'); import parsers"
 ```
 
 ### "GPS file not found"
@@ -293,37 +330,36 @@ pytest scripts/tests/test_sprint1.py -v
 #!/usr/bin/env python3
 """Complete pipeline: raw data → ground truth with ΔSI"""
 
-from scripts.parsers import parse_gps, parse_imu
 from scripts.physics import StabilityEngine
 from scripts.pipeline import build_ground_truth, export_ground_truth
 import pandas as pd
 
-# 1. Parse GPS
-print("Step 1: Parsing GPS...")
-gps_df = parse_gps('Doback-Data/GPS/GPS_DOBACK027_20250814_0.txt')
+# 1. Load processed route
+print("Step 1: Loading processed route...")
+route_df = pd.read_csv('Doback-Data/processed data/DOBACK024_20251005_seg1.csv')
+route_df = route_df.rename(columns={
+  'roll': 'roll_deg',
+  'pitch': 'pitch_deg',
+  'si': 'si_mcu',
+  'timeantwifi': 't_us'
+})
 
-# 2. Parse IMU
-print("Step 2: Parsing IMU...")
-imu_df = parse_imu('Doback-Data/Stability/ESTABILIDAD_DOBACK024_20250825_188.txt')
-
-# 3. Load physics model
-print("Step 3: Loading physics engine...")
+# 2. Load physics model
+print("Step 2: Loading physics engine...")
 engine = StabilityEngine('scripts/config/vehicle.yaml')
 print(f"   Critical angle: {engine.critical_angle(degrees=True):.2f}°")
 
-# 4. Build ground truth
-print("Step 4: Building ground truth...")
-gt_df = build_ground_truth(imu_df, engine)
+# 3. Build ground truth
+print("Step 3: Building ground truth...")
+gt_df = build_ground_truth(route_df, engine)
 print(f"   Generated {len(gt_df)} samples with ΔSI")
 
-# 5. Export
-print("Step 5: Exporting results...")
+# 4. Export
+print("Step 4: Exporting results...")
 export_ground_truth(gt_df, 'output/ground_truth.csv')
 
-# 6. Summary
+# 5. Summary
 print("\n=== SUMMARY ===")
-print(f"GPS Records:        {len(gps_df)}")
-print(f"IMU Records:        {len(imu_df)} @ 10 Hz")
 print(f"Ground Truth:       {len(gt_df)} samples")
 print(f"SI Range (MCU):     [{gt_df['si_real'].min():.3f}, {gt_df['si_real'].max():.3f}]")
 print(f"ΔSI Mean:          {gt_df['delta_si'].mean():.3f}")
@@ -341,7 +377,6 @@ python pipeline_example.py
 ## 📞 Soporte
 
 Para dudas, consulta:
-- Docstrings en cada módulo (`help(parse_gps)`, etc.)
 - Tests en `scripts/tests/` para ejemplos de uso
 - ROADMAP.md para detalles técnicos arquitectónicos
 
