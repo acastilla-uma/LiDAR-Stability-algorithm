@@ -48,9 +48,9 @@ class LAZReader:
         # Extract coordinates
         self.points = np.vstack([self.las.x, self.las.y, self.las.z]).T
         
-        # Build spatial index
+        # Build spatial index in XY only (2D), not XYZ
         logger.info(f"Building KD-tree with {len(self.points)} points...")
-        self.kdtree = cKDTree(self.points)
+        self.kdtree = cKDTree(self.points[:, :2])
         
         logger.info(f"LAZ reader initialized: {len(self.points)} ground points indexed")
     
@@ -97,12 +97,8 @@ class LAZReader:
         Returns:
             Array of shape (N, 3) containing [X, Y, Z] for N points
         """
-        # Query KD-tree for points within radius (using 3D distance in XY plane + z)
-        center = np.array([x_center, y_center, 0])
-        
-        # Find all points within radius
-        # KDTree.query_ball_point uses Euclidean distance in 3D, but we want XY radius only
-        # So we do a larger search and then filter by XY distance
+        # Query KD-tree for points within XY radius (2D)
+        center = np.array([x_center, y_center])
         indices = self.kdtree.query_ball_point(center, radius_m)
         
         if len(indices) == 0:
@@ -128,7 +124,7 @@ class LAZReader:
         Returns:
             Array of shape (K, 3) containing [X, Y, Z]
         """
-        center = np.array([x_center, y_center, 0])
+        center = np.array([x_center, y_center])
         distances, indices = self.kdtree.query(center, k=k)
         
         return self.points[indices]

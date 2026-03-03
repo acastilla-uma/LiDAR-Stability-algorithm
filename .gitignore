@@ -1,6 +1,13 @@
 # Ignored folders
 Doback-Data/
 LiDAR-Maps/
+cache/
+
+# Heavy geospatial formats
+*.laz
+*.las
+*.tif
+*.tiff
 
 # Python caches
 **/__pycache__/
@@ -10,3 +17,4 @@ LiDAR-Maps/
 
 # Output artifacts
 output/
+Scripts/output/

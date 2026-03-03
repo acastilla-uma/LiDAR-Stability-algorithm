@@ -1,30 +1,67 @@
-# Documentación del Proyecto
+# LiDAR Stability Algorithm
 
-Esta carpeta contiene toda la documentación del proyecto organizada en subcarpetas.
+Pipeline práctico para procesar rutas y generar visualización final 2D + 3D.
 
-## Estructura
+## Requisitos
 
-### 📚 [docs/](docs/)
-Documentación general y guías del proyecto:
-- **QUICK_START.md** - Guía de inicio rápido
-- **PROJECT_STATUS.md** - Estado actual del proyecto
-- **ROADMAP.md** - Hoja de ruta y planificación futura
+```bash
+pip install -r requirements.txt
+```
 
-### 🏃 [sprints/](sprints/)
-Documentación de sprints y reorganizaciones:
-- **SPRINT_1_BATCH_PROCESSING.md** - Sprint 1: Procesamiento por lotes
-- **SPRINT_3_COMPLETION.md** - Completación del Sprint 3
-- **SPRINT_3_SUMMARY.md** - Resumen del Sprint 3
-- **REORGANIZATION.md** - Plan de reorganización
-- **REORGANIZATION_SPRINT1.md** - Reorganización Sprint 1
+## Comando único (raw → processed-data → map-matched → 2D + 3D)
 
-### 📋 [planning/](planning/)
-Planificación y diseño original:
-- **PLAN_ORIGINAL.md** - Plan original del proyecto
+```bash
+python Scripts/pipeline/run_full_pipeline.py \
+  --base DOBACK024_20250929 \
+  --data-dir Doback-Data \
+  --processed-dir Doback-Data/processed-data \
+  --mapmatched-dir Doback-Data/map-matched \
+  --output-dir output \
+  --points-sample 700000
+```
 
-### 🔧 [technical/](technical/)
-Documentación técnica y resúmenes:
-- **MAP_MATCHING_SUMMARY.md** - Resumen de map matching
+Salida final:
+- `Doback-Data/processed-data/*.csv`
+- `Doback-Data/map-matched/*.csv`
+- `output/<BASE>_final_2d.png`
+- `output/<BASE>_final_3d.html`
 
-### 📝 Raíz
-- **CHANGELOG.md** - Registro de cambios del proyecto
+## Pasos manuales (opcional)
+
+### 1) Raw → processed-data
+
+```bash
+python Scripts/parsers/batch_processor.py \
+  --data-dir Doback-Data \
+  --output-dir Doback-Data/processed-data
+```
+
+### 2) processed-data → map-matched
+
+```bash
+python Scripts/parsers/map_matching.py \
+  --input Doback-Data/processed-data \
+  --output Doback-Data/map-matched
+```
+
+### 3) Visualización 2D
+
+```bash
+python Scripts/visualization/visualize_route_lidar.py \
+  --mapmatch Doback-Data/map-matched/DOBACK024_20250929_seg11.csv \
+  --output output/ruta_seg11_2d.png
+```
+
+### 4) Visualización 3D interactiva
+
+```bash
+python Scripts/visualization/visualize_3d_interactive.py \
+  --base DOBACK024_20250929 \
+  --points-sample 700000 \
+  --output output/ruta_3d_DOBACK024_20250929.html
+```
+
+Controles 3D:
+- Rotar: click + arrastrar
+- Zoom: rueda del ratón
+- Pan: Shift + click + arrastrar
