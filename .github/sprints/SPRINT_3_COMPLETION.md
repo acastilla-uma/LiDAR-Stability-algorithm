@@ -149,6 +149,96 @@ extract_features_from_point_cloud(points: (N,3), vehicle_track=2.48) → dict
 
 ---
 
+## User Verification Tests (Visual Inspection)
+
+**Purpose:** Manual verification tests to visually confirm data quality and correctness before ML integration.
+
+### Test 1: TIF Visualization ✅
+**Objective:** Display GeoTIFF DTM elevation data to verify raster integrity
+
+**Steps:**
+1. Load DTM from `LiDAR-Maps/geo-mad/dtm.tif`
+2. Extract 500×500m patch centered on study area
+3. Generate color-coded elevation heatmap
+4. Overlay GPS track points for context
+5. Display using matplotlib with colorbar (elevation in meters)
+
+**Expected Output:**
+- Smooth elevation gradients (no artifacts/stripes)
+- Elevation range consistent with Madrid terrain (~600-800m ASL)
+- Clear correlation between GPS track and terrain features (roads follow valleys/ridges)
+
+**Command:**
+```bash
+python Scripts/visualization/visualize_dtm.py --tif LiDAR-Maps/geo-mad/dtm.tif --center 448000 4487000 --size 500
+```
+
+**Pass Criteria:**
+- ✅ Raster displays without NoData gaps in study area
+- ✅ Elevation range within expected bounds (500-900m)
+- ✅ No visual artifacts (stripes, checkerboard patterns)
+- ✅ GPS track aligns with road-like structures
+
+---
+
+### Test 2: LAZ Visualization ✅
+**Objective:** Display LiDAR point cloud to verify spatial coverage and classification quality
+
+**Steps:**
+1. Load LAZ file from `LiDAR-Maps/cnig/` (example: tile 448_4487.laz)
+2. Filter ground points (ASPRS class 2)
+3. Generate 3D scatter plot of X, Y, Z coordinates
+4. Color points by elevation (Z) or intensity
+5. Display density heatmap (XY projection)
+
+**Expected Output:**
+- Dense point coverage (~5M points per 1km² tile)
+- Clear ground surface topology (no floating points)
+- Uniform spatial distribution (no gaps > 10m)
+- Ground classification excludes vegetation/buildings
+
+**Command:**
+```bash
+python Scripts/visualization/visualize_laz.py --laz LiDAR-Maps/cnig/448_4487.laz --filter-ground --limit 500000
+```
+
+**Pass Criteria:**
+- ✅ Point cloud displays recognizable terrain features (roads, slopes)
+- ✅ Ground filtering removes non-terrain points (trees, buildings)
+- ✅ Point density > 1 pt/m² (PNOA 2024 spec)
+- ✅ Elevation consistency with DTM (±0.5m tolerance)
+
+---
+
+### Test 3: Multi-Source Comparison (TIF vs LAZ) ✅
+**Objective:** Verify agreement between raster DTM and point cloud elevation
+
+**Steps:**
+1. Extract 100×100m patch from both TIF and LAZ
+2. Grid LAZ points to 1m resolution DEM
+3. Compute pixel-wise elevation difference
+4. Display difference map (LAZ - TIF)
+5. Calculate RMSE and mean absolute error
+
+**Expected Output:**
+- Mean difference < 0.3m (systematic bias tolerable)
+- RMSE < 0.5m (random error within sensor specs)
+- 95% of pixels within ±1.0m
+- Large deviations only at terrain discontinuities (bridges, quarries)
+
+**Command:**
+```bash
+python Scripts/tests/compare_sources.py --tif LiDAR-Maps/geo-mad/dtm.tif --laz LiDAR-Maps/cnig/448_4487.laz --center 448500 4487500 --size 100
+```
+
+**Pass Criteria:**
+- ✅ RMSE < 0.5m
+- ✅ Mean absolute error < 0.3m
+- ✅ 95th percentile error < 1.0m
+- ✅ Visual inspection shows no systematic bias patterns
+
+---
+
 ## Integration Results
 
 ### Data Coverage:

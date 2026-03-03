@@ -36,6 +36,11 @@
 - Real data validation on actual CNIG PNOA files
 - Synthetic DEM testing for edge cases
 
+### User Verification Tests (Visual Inspection):
+- **Test 1**: TIF visualization → verify DTM raster integrity with color-coded heatmap
+- **Test 2**: LAZ visualization → verify point cloud coverage and ground classification
+- **Test 3**: Multi-source comparison → verify TIF vs LAZ elevation agreement (RMSE < 0.5m)
+
 ---
 
 ## Test Results Summary
