@@ -137,19 +137,32 @@ class TerrainFeatureExtractor:
         Returns:
             Ruggedness index in meters
         """
-        dem_valid = dem[~np.isnan(dem)]
+        # Fill NaN values before computing differences
+        dem_filled = np.nan_to_num(dem, nan=np.nanmean(dem))
         
-        if len(dem_valid) < 2:
+        if dem_filled.size < 4:
             return 0.0
         
         # Compute differences between neighbors
         diffs = []
         
-        # Horizontal differences
-        diffs.extend(np.abs(np.diff(dem_valid, axis=1)).flatten())
+        # Horizontal differences (along columns)
+        try:
+            h_diffs = np.abs(np.diff(dem_filled, axis=1))
+            valid_h = h_diffs[~np.isnan(h_diffs)]
+            if len(valid_h) > 0:
+                diffs.extend(valid_h.flatten())
+        except Exception:
+            pass
         
-        # Vertical differences
-        diffs.extend(np.abs(np.diff(dem_valid, axis=0)).flatten())
+        # Vertical differences (along rows)
+        try:
+            v_diffs = np.abs(np.diff(dem_filled, axis=0))
+            valid_v = v_diffs[~np.isnan(v_diffs)]
+            if len(valid_v) > 0:
+                diffs.extend(valid_v.flatten())
+        except Exception:
+            pass
         
         if not diffs:
             return 0.0

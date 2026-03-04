@@ -33,7 +33,7 @@ def find_segment_files(base_name: str, mapmatch_dir: Path) -> list[Path]:
 def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: str = None,
                              points_sample: int = 50_000, stability_col: str = "si",
                              output_path: str = None, filter_ground: bool = True,
-                             padding_m: float = 100.0):
+                             padding_m: float = 100.0, show_terrain_features: bool = True):
     project_root = Path(__file__).parent.parent.parent
     mapmatch_dir = Path(mapmatch_dir) if mapmatch_dir else project_root / "Doback-Data" / "map-matched"
     laz_dir = Path(laz_dir) if laz_dir else project_root / "LiDAR-Maps" / "cnig"
@@ -44,6 +44,9 @@ def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: 
 
     segments_data = []
     all_x, all_y = [], []
+    
+    # Define terrain feature columns
+    terrain_feature_cols = ['phi_lidar', 'phi_lidar_deg', 'tri', 'ruggedness', 'z_min', 'z_max', 'z_mean', 'z_std', 'z_range']
 
     for seg_file in segment_files:
         df = pd.read_csv(seg_file)
@@ -58,7 +61,18 @@ def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: 
         x = df["x_utm"].values
         y = df["y_utm"].values
         si = df[stability_col].values
-        segments_data.append({"name": seg_file.stem, "x": x, "y": y, "si": si})
+        
+        # Check for available terrain features
+        available_features = [col for col in terrain_feature_cols if col in df.columns]
+        
+        seg_data = {"name": seg_file.stem, "x": x, "y": y, "si": si, "available_features": available_features}
+        
+        # Store terrain feature values if available
+        if available_features and show_terrain_features:
+            for feat in available_features:
+                seg_data[feat] = df[feat].values
+        
+        segments_data.append(seg_data)
         all_x.extend(x)
         all_y.extend(y)
 
@@ -100,6 +114,32 @@ def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: 
 
     for seg in segments_data:
         z = np.full_like(seg["x"], avg_z)
+        
+        # Build hover text with terrain features if available
+        hover_text = []
+        for i, si_val in enumerate(seg["si"]):
+            text_parts = [f"<b>SI</b>: {si_val:.3f}"]
+            
+            # Add terrain features to hover text if available
+            if seg.get("available_features"):
+                for feat in seg["available_features"]:
+                    if feat in seg:
+                        val = seg[feat][i] if isinstance(seg[feat], np.ndarray) else seg[feat]
+                        if pd.notna(val):
+                            if feat == 'phi_lidar_deg':
+                                text_parts.append(f"<b>φ (°)</b>: {val:.2f}")
+                            elif feat == 'phi_lidar':
+                                text_parts.append(f"<b>φ (rad)</b>: {val:.4f}")
+                            elif feat == 'tri':
+                                text_parts.append(f"<b>TRI</b>: {val:.4f}")
+                            elif feat == 'ruggedness':
+                                text_parts.append(f"<b>Ruggedness</b>: {val:.4f}")
+                            elif feat in ['z_min', 'z_max', 'z_mean', 'z_std', 'z_range']:
+                                short_name = feat.replace('z_', 'Z_').upper()
+                                text_parts.append(f"<b>{short_name}</b>: {val:.2f}m")
+            
+            hover_text.append("<br>".join(text_parts))
+        
         fig.add_trace(go.Scatter3d(
             x=seg["x"], y=seg["y"], z=z,
             mode='lines+markers',
@@ -107,7 +147,7 @@ def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: 
             marker=dict(size=3, color=seg["si"], colorscale='RdYlGn', cmin=0, cmax=1,
                         showscale=False),
             name=seg["name"],
-            text=[f"SI={v:.3f}" for v in seg["si"]],
+            text=hover_text,
             hovertemplate="<b>%{fullData.name}</b><br>X=%{x:.1f}<br>Y=%{y:.1f}<br>%{text}<extra></extra>"
         ))
 
@@ -154,6 +194,8 @@ def main():
     parser.add_argument("--no-ground-filter", action="store_true")
     parser.add_argument("--padding", type=float, default=100.0)
     parser.add_argument("--output", default=None)
+    parser.add_argument("--show-terrain-features", action="store_true", default=True,
+                       help="Display terrain features in hover tooltips if available")
     args = parser.parse_args()
 
     try:
@@ -166,6 +208,7 @@ def main():
             output_path=args.output,
             filter_ground=not args.no_ground_filter,
             padding_m=args.padding,
+            show_terrain_features=args.show_terrain_features,
         )
     except Exception as exc:
         print(f"❌ ERROR: {exc}")

@@ -53,6 +53,12 @@ def main() -> int:
     parser.add_argument("--max-points-2d", type=int, default=300000)
     parser.add_argument("--skip-processing", action="store_true")
     parser.add_argument("--skip-mapmatching", action="store_true")
+    parser.add_argument("--skip-terrain-features", action="store_true",
+                       help="Skip terrain feature extraction")
+    parser.add_argument("--terrain-search-radius", type=float, default=100.0,
+                       help="Search radius for terrain features (m)")
+    parser.add_argument("--terrain-dem-size", type=int, default=256,
+                       help="DEM grid size for feature extraction")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -93,6 +99,28 @@ def main() -> int:
             ], cwd=repo_root)
         else:
             print("\n[SKIP] processed -> map-matched")
+
+        # Extract terrain features from map-matched data
+        if not args.skip_terrain_features:
+            print("\n📊 Extracting terrain features...")
+            mapmatch_files = sorted(mapmatched_dir.glob(f"{args.base}*.csv"))
+            for mmf in mapmatch_files:
+                print(f"  Processing: {mmf.name}")
+                try:
+                    run_cmd([
+                        sys.executable,
+                        "Scripts/lidar/compute_route_terrain_features.py",
+                        "--mapmatch", str(mmf),
+                        "--laz-dir", str(laz_dir),
+                        "--output", str(mmf),  # Overwrite with enriched version
+                        "--search-radius", str(args.terrain_search_radius),
+                        "--dem-size", str(args.terrain_dem_size),
+                    ], cwd=repo_root)
+                except Exception as e:
+                    print(f"  ⚠️ Warning: Terrain feature extraction failed for {mmf.name}: {e}")
+                    # Continue with visualization even if feature extraction fails
+        else:
+            print("\n[SKIP] terrain feature extraction")
 
         mapmatch_2d = find_mapmatched_for_2d(args.base, mapmatched_dir)
         out_2d = output_dir / f"{args.base}_final_2d.png"
