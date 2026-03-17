@@ -599,7 +599,7 @@ def enrich_route_with_terrain_features(
 python Scripts/lidar/compute_route_terrain_features.py \
     --mapmatch Doback-Data/map-matched/DOBACK024_20251009_seg87.csv \
     --laz-dir LiDAR-Maps/cnig \
-    --output output_enriched.csv
+    --output Doback-Data/featured/DOBACK024_20251009_seg87.csv
 
 # Full pipeline
 python Scripts/pipeline/run_full_pipeline.py \

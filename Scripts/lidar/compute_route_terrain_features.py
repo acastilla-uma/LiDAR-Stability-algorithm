@@ -15,7 +15,7 @@ Uso:
     python Scripts/lidar/compute_route_terrain_features.py \
         --mapmatch Doback-Data/map-matched/DOBACK024_20251009_seg87.csv \
         --laz-dir LiDAR-Maps/cnig \
-        --output Doback-Data/map-matched/DOBACK024_20251009_seg87_enriched.csv \
+        --output Doback-Data/featured/DOBACK024_20251009_seg87.csv \
         --patch-size 256 \
         --search-radius 100
 """
@@ -196,7 +196,7 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
     Args:
         mapmatch_path: Path to map-matched CSV
         laz_dir: Directory with LAZ files
-        output_path: Where to save enriched CSV (if None, overwrites input)
+        output_path: Where to save enriched CSV
         search_radius: Radius to search for LiDAR points around each route point (m)
         dem_size: Size of DEM grid for feature extraction
         vehicle_track: Vehicle track width (m)
@@ -294,7 +294,7 @@ def main():
     )
     parser.add_argument("--mapmatch", required=True, help="Map-matched CSV file")
     parser.add_argument("--laz-dir", default=None, help="Directory with LAZ files")
-    parser.add_argument("--output", default=None, help="Output CSV (default: overwrite input)")
+    parser.add_argument("--output", default=None, help="Output CSV (default: Doback-Data/featured/<name>.csv)")
     parser.add_argument("--search-radius", type=float, default=100.0, 
                        help="Search radius for LiDAR points (m)")
     parser.add_argument("--dem-size", type=int, default=256,
@@ -307,7 +307,12 @@ def main():
     args = parser.parse_args()
     
     try:
-        output = args.output or args.mapmatch  # Overwrite by default
+        mapmatch_path = Path(args.mapmatch)
+        if args.output:
+            output = args.output
+        else:
+            project_root = Path(__file__).parent.parent.parent
+            output = str(project_root / "Doback-Data" / "featured" / mapmatch_path.name)
         enrich_route_with_terrain_features(
             mapmatch_path=args.mapmatch,
             laz_dir=args.laz_dir,

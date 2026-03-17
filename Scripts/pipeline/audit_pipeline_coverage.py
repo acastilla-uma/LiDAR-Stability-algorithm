@@ -6,7 +6,7 @@ Measures how many raw DOBACK routes are:
 1) available as raw GPS+Stability pairs,
 2) processed into CSV,
 3) map-matched,
-4) enriched with terrain features.
+4) enriched with terrain features (featured).
 
 It also reports totals at file/segment level and can export a detailed CSV.
 
@@ -140,17 +140,25 @@ def inspect_many(paths: Iterable[Path]) -> list[CsvInfo]:
     return [inspect_csv(path) for path in paths]
 
 
-def build_rows(raw_pairs: dict[str, dict[str, Path]], processed_dir: Path, mapmatched_dir: Path) -> list[dict]:
+def build_rows(
+    raw_pairs: dict[str, dict[str, Path]],
+    processed_dir: Path,
+    mapmatched_dir: Path,
+    featured_dir: Path,
+) -> list[dict]:
     processed_grouped = group_csvs_by_base(processed_dir)
     mapmatched_grouped = group_csvs_by_base(mapmatched_dir)
+    featured_grouped = group_csvs_by_base(featured_dir)
 
     rows: list[dict] = []
     for key, raw_paths in raw_pairs.items():
         processed_files = processed_grouped.get(key, [])
         mapmatched_files = mapmatched_grouped.get(key, [])
+        featured_files = featured_grouped.get(key, [])
 
         processed_info = inspect_many(processed_files) if processed_files else []
         mapmatched_info = inspect_many(mapmatched_files) if mapmatched_files else []
+        featured_info = inspect_many(featured_files) if featured_files else []
 
         rows.append(
             {
@@ -161,15 +169,15 @@ def build_rows(raw_pairs: dict[str, dict[str, Path]], processed_dir: Path, mapma
                 "processed_rows": sum(info.row_count for info in processed_info),
                 "mapmatched_files": len(mapmatched_info),
                 "mapmatched_rows": sum(info.row_count for info in mapmatched_info),
-                "feature_files": sum(1 for info in mapmatched_info if info.has_features_columns),
-                "feature_value_files": sum(1 for info in mapmatched_info if info.has_features_values),
-                "feature_rows": sum(info.row_count for info in mapmatched_info if info.has_features_values),
+                "feature_files": sum(1 for info in featured_info if info.has_features_columns),
+                "feature_value_files": sum(1 for info in featured_info if info.has_features_values),
+                "feature_rows": sum(info.row_count for info in featured_info if info.has_features_values),
                 "is_processed": int(len(processed_info) > 0),
                 "is_mapmatched": int(len(mapmatched_info) > 0),
-                "has_features": int(any(info.has_features_values for info in mapmatched_info)),
+                "has_features": int(any(info.has_features_values for info in featured_info)),
                 "processed_file_names": ";".join(info.path.name for info in processed_info),
                 "mapmatched_file_names": ";".join(info.path.name for info in mapmatched_info),
-                "feature_file_names": ";".join(info.path.name for info in mapmatched_info if info.has_features_values),
+                "feature_file_names": ";".join(info.path.name for info in featured_info if info.has_features_values),
             }
         )
 
@@ -270,6 +278,7 @@ def main() -> int:
     parser.add_argument("--data-dir", default=str(BASE / "Doback-Data"))
     parser.add_argument("--processed-dir", default=str(BASE / "Doback-Data" / "processed-data"))
     parser.add_argument("--mapmatched-dir", default=str(BASE / "Doback-Data" / "map-matched"))
+    parser.add_argument("--featured-dir", default=str(BASE / "Doback-Data" / "featured"))
     parser.add_argument("--output", default=str(BASE / "output" / "pipeline_audit.csv"))
     parser.add_argument("--json", action="store_true", help="Also print summary as JSON")
     parser.add_argument(
@@ -282,10 +291,11 @@ def main() -> int:
     data_dir = Path(args.data_dir)
     processed_dir = Path(args.processed_dir)
     mapmatched_dir = Path(args.mapmatched_dir)
+    featured_dir = Path(args.featured_dir)
     output_path = Path(args.output)
 
     raw_pairs = discover_raw_pairs(data_dir)
-    rows = build_rows(raw_pairs, processed_dir, mapmatched_dir)
+    rows = build_rows(raw_pairs, processed_dir, mapmatched_dir, featured_dir)
     summary = summarize(rows)
     device_summaries = summarize_by_device(rows)
 

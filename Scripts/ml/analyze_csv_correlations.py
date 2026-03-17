@@ -8,7 +8,7 @@ No feature extraction needed - just correlation analysis and visualization.
 
 Usage:
     python Scripts/ml/analyze_csv_correlations.py \
-        --file Doback-Data/map-matched/DOBACK024_20251009_seg87.csv \
+    --file Doback-Data/featured/DOBACK024_20251009_seg87.csv \
         --output output/correlations_report.html
 """
 

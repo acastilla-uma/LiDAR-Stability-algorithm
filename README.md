@@ -8,7 +8,7 @@ Pipeline práctico para procesar rutas y generar visualización final 2D + 3D.
 pip install -r requirements.txt
 ```
 
-## Comando único (raw → processed-data → map-matched → 2D + 3D)
+## Comando único (raw → processed-data → map-matched → featured → 2D + 3D)
 
 ```bash
 python Scripts/pipeline/run_full_pipeline.py \
@@ -16,6 +16,7 @@ python Scripts/pipeline/run_full_pipeline.py \
   --data-dir Doback-Data \
   --processed-dir Doback-Data/processed-data \
   --mapmatched-dir Doback-Data/map-matched \
+  --featured-dir Doback-Data/featured \
   --output-dir output \
   --points-sample 700000
 ```
@@ -23,6 +24,7 @@ python Scripts/pipeline/run_full_pipeline.py \
 Salida final:
 - `Doback-Data/processed-data/*.csv`
 - `Doback-Data/map-matched/*.csv`
+- `Doback-Data/featured/*.csv`
 - `output/<BASE>_final_2d.png`
 - `output/<BASE>_final_3d.html`
 
@@ -48,7 +50,7 @@ python Scripts/parsers/map_matching.py \
 
 ```bash
 python Scripts/visualization/visualize_route_lidar.py \
-  --mapmatch Doback-Data/map-matched/DOBACK024_20250929_seg11.csv \
+  --mapmatch Doback-Data/featured/DOBACK024_20250929_seg11.csv \
   --output output/ruta_seg11_2d.png
 ```
 

@@ -35,7 +35,15 @@ def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: 
                              output_path: str = None, filter_ground: bool = True,
                              padding_m: float = 100.0, show_terrain_features: bool = True):
     project_root = Path(__file__).parent.parent.parent
-    mapmatch_dir = Path(mapmatch_dir) if mapmatch_dir else project_root / "Doback-Data" / "map-matched"
+    if mapmatch_dir:
+        mapmatch_dir = Path(mapmatch_dir)
+    else:
+        featured_dir = project_root / "Doback-Data" / "featured"
+        fallback_mapmatched_dir = project_root / "Doback-Data" / "map-matched"
+        mapmatch_dir = featured_dir
+
+        if not list(featured_dir.glob(f"{base_name}*.csv")) and list(fallback_mapmatched_dir.glob(f"{base_name}*.csv")):
+            mapmatch_dir = fallback_mapmatched_dir
     laz_dir = Path(laz_dir) if laz_dir else project_root / "LiDAR-Maps" / "cnig"
 
     segment_files = find_segment_files(base_name, mapmatch_dir)

@@ -444,6 +444,14 @@ python Scripts/parsers/map_matching.py \
     --network-type drive_service  # Tipo de carreteras
 ```
 
+### Siguiente etapa (features de terreno en `featured`)
+
+```bash
+python Scripts/lidar/compute_route_terrain_features.py \
+    --mapmatch Doback-Data/map-matched/DOBACK024_20251009_seg87.csv \
+    --output Doback-Data/featured/DOBACK024_20251009_seg87.csv
+```
+
 ---
 
 ## Parámetros Ajustables

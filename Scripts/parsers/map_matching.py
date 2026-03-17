@@ -21,6 +21,10 @@ Columnas nuevas / modificadas en el output:
   highway           → tipo de vía OSM (motorway, trunk, primary…)
   edge_id           → id interno de la arista
 
+Nota: este script escribe en `Doback-Data/map-matched`. Los CSV enriquecidos
+con features de terreno se guardan en `Doback-Data/featured` mediante
+`Scripts/lidar/compute_route_terrain_features.py`.
+
 Uso
 ---
     # Procesar todos los ficheros (descarga automática de red si hace falta)
