@@ -18,6 +18,11 @@ Uso:
         --output Doback-Data/featured/DOBACK024_20251009_seg87.csv \
         --patch-size 256 \
         --search-radius 100
+
+    python Scripts/lidar/compute_route_terrain_features.py \
+        --doback DOBACK023 \
+        --laz-dir LiDAR-Maps/cnig \
+        --search-radius 100
 """
 
 import argparse
@@ -287,14 +292,72 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
     return df
 
 
+def normalize_doback_id(raw_doback: str) -> str:
+    """Normalize DOBACK identifier to canonical format (e.g., DOBACK023)."""
+    token = raw_doback.strip().upper()
+    if token.startswith("DOBACK"):
+        return token
+    if token.isdigit():
+        return f"DOBACK{int(token):03d}"
+    return token
+
+
+def enrich_doback_batch(doback: str,
+                        mapmatch_dir: Optional[str] = None,
+                        featured_dir: Optional[str] = None,
+                        laz_dir: Optional[str] = None,
+                        search_radius: float = 100.0,
+                        dem_size: int = 256,
+                        vehicle_track: float = 2.48,
+                        sampling: int = 1) -> tuple[int, int]:
+    """Process all map-matched CSV files for a given DOBACK ID."""
+    project_root = Path(__file__).parent.parent.parent
+    doback_id = normalize_doback_id(doback)
+    mapmatch_root = Path(mapmatch_dir) if mapmatch_dir else project_root / "Doback-Data" / "map-matched"
+    featured_root = Path(featured_dir) if featured_dir else project_root / "Doback-Data" / "featured"
+
+    files = sorted(mapmatch_root.glob(f"{doback_id}_*.csv"))
+    if not files:
+        raise FileNotFoundError(f"No map-matched files found for {doback_id} in {mapmatch_root}")
+
+    logger.info(f"Found {len(files)} files for {doback_id}")
+    success = 0
+    failed = 0
+
+    for mapmatch_file in files:
+        output_file = featured_root / mapmatch_file.name
+        logger.info(f"Processing: {mapmatch_file.name}")
+        try:
+            enrich_route_with_terrain_features(
+                mapmatch_path=str(mapmatch_file),
+                laz_dir=laz_dir,
+                output_path=str(output_file),
+                search_radius=search_radius,
+                dem_size=dem_size,
+                vehicle_track=vehicle_track,
+                sampling=sampling,
+            )
+            success += 1
+        except Exception as exc:
+            failed += 1
+            logger.error(f"Failed {mapmatch_file.name}: {exc}")
+
+    logger.info(f"Batch finished for {doback_id}: {success} ok, {failed} failed")
+    return success, failed
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Enrich map-matched routes with terrain features from LiDAR",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--mapmatch", required=True, help="Map-matched CSV file")
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("--mapmatch", help="Map-matched CSV file (single-file mode)")
+    mode_group.add_argument("--doback", help="DOBACK ID to process all its map-matched files (e.g., DOBACK023 or 23)")
     parser.add_argument("--laz-dir", default=None, help="Directory with LAZ files")
-    parser.add_argument("--output", default=None, help="Output CSV (default: Doback-Data/featured/<name>.csv)")
+    parser.add_argument("--output", default=None, help="Output CSV (single-file mode only)")
+    parser.add_argument("--mapmatch-dir", default=None, help="Directory with map-matched CSVs (batch mode)")
+    parser.add_argument("--featured-dir", default=None, help="Output directory for enriched CSVs (batch mode)")
     parser.add_argument("--search-radius", type=float, default=100.0, 
                        help="Search radius for LiDAR points (m)")
     parser.add_argument("--dem-size", type=int, default=256,
@@ -307,21 +370,38 @@ def main():
     args = parser.parse_args()
     
     try:
-        mapmatch_path = Path(args.mapmatch)
-        if args.output:
-            output = args.output
+        if args.mapmatch:
+            mapmatch_path = Path(args.mapmatch)
+            if args.output:
+                output = args.output
+            else:
+                project_root = Path(__file__).parent.parent.parent
+                output = str(project_root / "Doback-Data" / "featured" / mapmatch_path.name)
+
+            enrich_route_with_terrain_features(
+                mapmatch_path=args.mapmatch,
+                laz_dir=args.laz_dir,
+                output_path=output,
+                search_radius=args.search_radius,
+                dem_size=args.dem_size,
+                vehicle_track=args.vehicle_track,
+                sampling=args.sampling,
+            )
         else:
-            project_root = Path(__file__).parent.parent.parent
-            output = str(project_root / "Doback-Data" / "featured" / mapmatch_path.name)
-        enrich_route_with_terrain_features(
-            mapmatch_path=args.mapmatch,
-            laz_dir=args.laz_dir,
-            output_path=output,
-            search_radius=args.search_radius,
-            dem_size=args.dem_size,
-            vehicle_track=args.vehicle_track,
-            sampling=args.sampling
-        )
+            if args.output:
+                raise ValueError("--output is only valid with --mapmatch. Use --featured-dir in batch mode.")
+            _, failed = enrich_doback_batch(
+                doback=args.doback,
+                mapmatch_dir=args.mapmatch_dir,
+                featured_dir=args.featured_dir,
+                laz_dir=args.laz_dir,
+                search_radius=args.search_radius,
+                dem_size=args.dem_size,
+                vehicle_track=args.vehicle_track,
+                sampling=args.sampling,
+            )
+            if failed > 0:
+                return 1
         return 0
     except Exception as e:
         logger.error(f"❌ ERROR: {e}")
