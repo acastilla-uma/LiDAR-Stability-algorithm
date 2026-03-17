@@ -20,6 +20,13 @@ def run_cmd(cmd: List[str], cwd: Path) -> None:
         raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(cmd)}")
 
 
+def normalize_cli_path(path_value: str | None) -> str | None:
+    if path_value is None:
+        return None
+    normalized = path_value.replace("\\", "/")
+    return str(Path(normalized))
+
+
 def find_csv_for_2d(base: str, input_dir: Path) -> Path:
     seg_files = sorted(input_dir.glob(f"{base}_seg*.csv"))
     if seg_files:
@@ -68,6 +75,14 @@ def main() -> int:
     parser.add_argument("--terrain-dem-size", type=int, default=256,
                        help="DEM grid size for feature extraction")
     args = parser.parse_args()
+
+    args.data_dir = normalize_cli_path(args.data_dir)
+    args.processed_dir = normalize_cli_path(args.processed_dir)
+    args.mapmatched_dir = normalize_cli_path(args.mapmatched_dir)
+    args.featured_dir = normalize_cli_path(args.featured_dir)
+    args.output_dir = normalize_cli_path(args.output_dir)
+    args.laz_dir = normalize_cli_path(args.laz_dir)
+    args.tif_dir = normalize_cli_path(args.tif_dir)
 
     repo_root = Path(__file__).resolve().parents[2]
     data_dir = (repo_root / args.data_dir).resolve()

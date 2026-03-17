@@ -42,6 +42,13 @@ FEATURE_COLUMNS = [
 ]
 
 
+def normalize_cli_path(path_value: str | None) -> str | None:
+    if path_value is None:
+        return None
+    normalized = path_value.replace("\\", "/")
+    return str(Path(normalized))
+
+
 @dataclass
 class CsvInfo:
     path: Path
@@ -287,6 +294,12 @@ def main() -> int:
         help="Mostrar solo porcentajes por dispositivo y no guardar CSV",
     )
     args = parser.parse_args()
+
+    args.data_dir = normalize_cli_path(args.data_dir)
+    args.processed_dir = normalize_cli_path(args.processed_dir)
+    args.mapmatched_dir = normalize_cli_path(args.mapmatched_dir)
+    args.featured_dir = normalize_cli_path(args.featured_dir)
+    args.output = normalize_cli_path(args.output)
 
     data_dir = Path(args.data_dir)
     processed_dir = Path(args.processed_dir)

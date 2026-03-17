@@ -805,8 +805,24 @@ def parse_args():
     return p.parse_args()
 
 
+def normalize_cli_path(path_value: str | None) -> str | None:
+    """
+    Normalize CLI path separators so paths copied from Windows/Linux
+    can still work on the other platform.
+    """
+    if path_value is None:
+        return None
+    normalized = path_value.replace("\\", "/")
+    return str(Path(normalized))
+
+
 def main():
     args = parse_args()
+
+    args.input = normalize_cli_path(args.input)
+    args.output = normalize_cli_path(args.output)
+    args.network = normalize_cli_path(args.network)
+    args.file = normalize_cli_path(args.file)
 
     # 1. Recopilar ficheros
     csv_files = collect_csv_files(args.input, args.glob, args.file)
