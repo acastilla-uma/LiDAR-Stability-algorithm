@@ -9,9 +9,9 @@ vehicle:
   mass_kg: 18000  # Total mass in kilograms
   
   # Geometry
-  track_width_m: 2.480  # Ancho de vía (S) - distance between wheels
-  cg_height_m: 1.850    # Height of center of gravity (Hg)
-  wheelbase_m: 3.5      # Estimated wheelbase (to be validated)
+  track_width_m: 1.100  # Firmware-aligned base width (s in .ino, meters)
+  cg_height_m: 4.164    # Derived h from .ino defaults: sqrt((d1*1000)^2-(s/2)^2)
+  wheelbase_m: 1.100    # Firmware-aligned k4 default (meters)
   
   # Inertia
   roll_inertia_kg_m2: 89300  # Roll moment of inertia (Ixx)
@@ -21,11 +21,22 @@ vehicle:
   
 # Stability thresholds
 stability:
-  critical_angle_deg: 33.8  # Rollover threshold φc = arctan(S / (2*Hg))
-  critical_angle_rad: 0.5899  # In radians
+  critical_angle_deg: 7.53  # Firmware-aligned φcrit lateral
+  critical_angle_rad: 0.1314  # In radians
   si_safe_threshold: 0.4    # SI < this = Safe for autonomous nav
   si_warning_threshold: 0.7   # SI in [0.7, 0.85] = Caution
   si_danger_threshold: 0.85   # SI >= this = Danger/Rollover risk
+
+# SI model coefficients
+stability_model:
+  k1: 1.15
+  k2: 2.05
+  d1_m: 4.2
+  s_mm: 1100.0
+  k4_mm: 1100.0
+  coeff: 7.14
+  alphav: 64.0
+  gy_avg_window: 10
 
 # Sensor configuration (for reference)
 sensors:

@@ -66,7 +66,9 @@ def extract_terrain_features_at_point(x: float, y: float,
                                      laz_tiles: list[Path],
                                      search_radius: float = 100.0,
                                      dem_size: int = 256,
-                                     vehicle_track: float = 2.48) -> Dict[str, float]:
+                                     vehicle_track: float = 2.48,
+                                     reader_cache: Optional[dict[Path, LAZReader]] = None,
+                                     failed_tiles: Optional[set[Path]] = None) -> Dict[str, float]:
     """
     Extract terrain features around a route point.
     
@@ -94,15 +96,28 @@ def extract_terrain_features_at_point(x: float, y: float,
     }
     
     # Load points from nearby LAZ tiles
+    if reader_cache is None:
+        reader_cache = {}
+    if failed_tiles is None:
+        failed_tiles = set()
+
     all_points = []
     for tile_path in laz_tiles:
+        if tile_path in failed_tiles:
+            continue
+
         try:
-            reader = LAZReader(str(tile_path), filter_ground=False)
+            reader = reader_cache.get(tile_path)
+            if reader is None:
+                reader = LAZReader(str(tile_path), filter_ground=False)
+                reader_cache[tile_path] = reader
+
             pts = reader.extract_patch(x_center=x, y_center=y, radius_m=search_radius)
             if pts is not None and len(pts) > 0:
                 all_points.append(pts)
         except Exception as e:
-            logger.debug(f"Could not load {tile_path.name}: {e}")
+            failed_tiles.add(tile_path)
+            logger.warning(f"Skipping LAZ tile after read error ({tile_path.name}): {e}")
     
     if not all_points:
         logger.debug(f"No LiDAR points found near ({x:.1f}, {y:.1f})")
@@ -224,6 +239,10 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
     
     logger.info(f"Computing terrain features for {len(indices)} points")
     
+    # Reuse readers across points and skip broken tiles after first failure
+    reader_cache: dict[Path, LAZReader] = {}
+    failed_tiles: set[Path] = set()
+
     # Process each point
     for i in tqdm(indices, desc="Extracting terrain features"):
         x = df.loc[i, 'x_utm']
@@ -241,7 +260,9 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
             laz_tiles,
             search_radius=search_radius,
             dem_size=dem_size,
-            vehicle_track=vehicle_track
+            vehicle_track=vehicle_track,
+            reader_cache=reader_cache,
+            failed_tiles=failed_tiles,
         )
         
         # Store in dataframe
@@ -254,6 +275,8 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
             df[col] = df[col].interpolate(method='linear', limit_direction='both')
     
     logger.info(f"✅ Enrichment complete")
+    if failed_tiles:
+        logger.warning(f"LAZ tiles skipped due to read errors: {len(failed_tiles)}")
     
     if output_path:
         out = Path(output_path)
