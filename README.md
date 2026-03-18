@@ -67,3 +67,22 @@ Controles 3D:
 - Rotar: click + arrastrar
 - Zoom: rueda del ratón
 - Pan: Shift + click + arrastrar
+
+### 5) Descargar teselas CNIG LiDAR 3ª cobertura
+
+Usando la lista generada en `output/cnig_missing_tiles_all_doback.txt`:
+
+```bash
+python Scripts/lidar/download_cnig_lidar_tiles.py \
+  --list output/cnig_missing_tiles_all_doback.txt \
+  --dest LiDAR-Maps/cnig
+```
+
+Prueba en seco (sin descargar):
+
+```bash
+python Scripts/lidar/download_cnig_lidar_tiles.py \
+  --list output/cnig_missing_tiles_all_doback.txt \
+  --dry-run \
+  --max-files 10
+```

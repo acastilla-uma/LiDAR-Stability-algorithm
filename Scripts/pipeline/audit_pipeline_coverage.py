@@ -178,13 +178,16 @@ def build_rows(
                 "mapmatched_rows": sum(info.row_count for info in mapmatched_info),
                 "feature_files": sum(1 for info in featured_info if info.has_features_columns),
                 "feature_value_files": sum(1 for info in featured_info if info.has_features_values),
-                "feature_rows": sum(info.row_count for info in featured_info if info.has_features_values),
+                "feature_rows": sum(info.row_count for info in featured_info if info.has_features_columns),
+                "feature_value_rows": sum(info.row_count for info in featured_info if info.has_features_values),
                 "is_processed": int(len(processed_info) > 0),
                 "is_mapmatched": int(len(mapmatched_info) > 0),
-                "has_features": int(any(info.has_features_values for info in featured_info)),
+                "has_features": int(any(info.has_features_columns for info in featured_info)),
+                "has_feature_values": int(any(info.has_features_values for info in featured_info)),
                 "processed_file_names": ";".join(info.path.name for info in processed_info),
                 "mapmatched_file_names": ";".join(info.path.name for info in mapmatched_info),
-                "feature_file_names": ";".join(info.path.name for info in featured_info if info.has_features_values),
+                "feature_file_names": ";".join(info.path.name for info in featured_info if info.has_features_columns),
+                "feature_value_file_names": ";".join(info.path.name for info in featured_info if info.has_features_values),
             }
         )
 
@@ -196,21 +199,26 @@ def summarize(rows: list[dict]) -> dict:
     processed_routes = sum(row["is_processed"] for row in rows)
     mapmatched_routes = sum(row["is_mapmatched"] for row in rows)
     featured_routes = sum(row["has_features"] for row in rows)
+    featured_value_routes = sum(row["has_feature_values"] for row in rows)
 
     return {
         "raw_pairs_total": total_raw,
         "raw_pairs_processed": processed_routes,
         "raw_pairs_mapmatched": mapmatched_routes,
         "raw_pairs_with_features": featured_routes,
+        "raw_pairs_with_feature_values": featured_value_routes,
         "processed_files_total": sum(row["processed_files"] for row in rows),
         "mapmatched_files_total": sum(row["mapmatched_files"] for row in rows),
-        "feature_files_total": sum(row["feature_value_files"] for row in rows),
+        "feature_files_total": sum(row["feature_files"] for row in rows),
+        "feature_value_files_total": sum(row["feature_value_files"] for row in rows),
         "processed_rows_total": sum(row["processed_rows"] for row in rows),
         "mapmatched_rows_total": sum(row["mapmatched_rows"] for row in rows),
         "feature_rows_total": sum(row["feature_rows"] for row in rows),
+        "feature_value_rows_total": sum(row["feature_value_rows"] for row in rows),
         "processed_pct": (processed_routes / total_raw * 100.0) if total_raw else 0.0,
         "mapmatched_pct": (mapmatched_routes / total_raw * 100.0) if total_raw else 0.0,
         "features_pct": (featured_routes / total_raw * 100.0) if total_raw else 0.0,
+        "feature_values_pct": (featured_value_routes / total_raw * 100.0) if total_raw else 0.0,
     }
 
 
@@ -227,6 +235,7 @@ def summarize_by_device(rows: list[dict]) -> list[dict]:
         processed = sum(item["is_processed"] for item in items)
         mapmatched = sum(item["is_mapmatched"] for item in items)
         features = sum(item["has_features"] for item in items)
+        feature_values = sum(item["has_feature_values"] for item in items)
         summaries.append(
             {
                 "device": device,
@@ -234,9 +243,11 @@ def summarize_by_device(rows: list[dict]) -> list[dict]:
                 "processed_routes": processed,
                 "mapmatched_routes": mapmatched,
                 "feature_routes": features,
+                "feature_value_routes": feature_values,
                 "processed_pct": (processed / total * 100.0) if total else 0.0,
                 "mapmatched_pct": (mapmatched / total * 100.0) if total else 0.0,
                 "features_pct": (features / total * 100.0) if total else 0.0,
+                "feature_values_pct": (feature_values / total * 100.0) if total else 0.0,
             }
         )
     return summaries
@@ -248,14 +259,17 @@ def print_summary(summary: dict) -> None:
     print(f"Processed routes:          {summary['raw_pairs_processed']} ({summary['processed_pct']:.1f}%)")
     print(f"Map-matched routes:        {summary['raw_pairs_mapmatched']} ({summary['mapmatched_pct']:.1f}%)")
     print(f"Routes with features:      {summary['raw_pairs_with_features']} ({summary['features_pct']:.1f}%)")
+    print(f"Routes with feature values:{summary['raw_pairs_with_feature_values']} ({summary['feature_values_pct']:.1f}%)")
     print()
     print(f"Processed CSV files:       {summary['processed_files_total']}")
     print(f"Map-matched CSV files:     {summary['mapmatched_files_total']}")
-    print(f"Feature-complete CSV files:{summary['feature_files_total']}")
+    print(f"Featured CSV files:        {summary['feature_files_total']}")
+    print(f"Feature-value CSV files:   {summary['feature_value_files_total']}")
     print()
     print(f"Processed rows total:      {summary['processed_rows_total']:,}")
     print(f"Map-matched rows total:    {summary['mapmatched_rows_total']:,}")
     print(f"Feature rows total:        {summary['feature_rows_total']:,}")
+    print(f"Feature-value rows total:  {summary['feature_value_rows_total']:,}")
 
 
 def print_simple_summary(device_summaries: list[dict]) -> None:
@@ -265,7 +279,8 @@ def print_simple_summary(device_summaries: list[dict]) -> None:
             f"{item['device']}: raw={item['raw_pairs']}, "
             f"processed={item['processed_pct']:.1f}%, "
             f"map-matched={item['mapmatched_pct']:.1f}%, "
-            f"features={item['features_pct']:.1f}%"
+            f"features={item['features_pct']:.1f}%, "
+            f"feature-values={item['feature_values_pct']:.1f}%"
         )
 
 

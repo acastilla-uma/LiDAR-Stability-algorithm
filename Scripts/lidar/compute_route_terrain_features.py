@@ -45,6 +45,21 @@ from lidar.terrain_features import TerrainFeatureExtractor
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+FEATURE_COLUMNS = [
+    'phi_lidar', 'phi_lidar_deg', 'tri', 'ruggedness',
+    'z_min', 'z_max', 'z_mean', 'z_std', 'z_range', 'n_points_used'
+]
+
+FINITE_FEATURE_COLUMNS = [
+    'phi_lidar', 'phi_lidar_deg', 'tri', 'ruggedness',
+    'z_min', 'z_max', 'z_mean', 'z_std', 'z_range'
+]
+
+
+def _are_features_finite(features: Dict[str, float]) -> bool:
+    """Return True only if all terrain feature outputs are finite values."""
+    return all(np.isfinite(features.get(col, np.nan)) for col in FINITE_FEATURE_COLUMNS)
+
 
 def find_relevant_laz_tiles(x_center: float, y_center: float, search_radius: float, laz_dir: Path) -> list[Path]:
     """Find LAZ tiles that might contain points near (x, y)."""
@@ -99,6 +114,9 @@ def extract_terrain_features_at_point(x: float, y: float,
         'z_range': np.nan,
         'n_points_used': 0,
     }
+
+    if not laz_tiles:
+        return features
     
     # Load points from nearby LAZ tiles
     if reader_cache is None:
@@ -129,7 +147,9 @@ def extract_terrain_features_at_point(x: float, y: float,
         return features
     
     cloud = np.vstack(all_points)
-    features['n_points_used'] = len(cloud)
+    finite_cloud_mask = np.isfinite(cloud).all(axis=1)
+    cloud = cloud[finite_cloud_mask]
+    features['n_points_used'] = int(len(cloud))
     
     if len(cloud) < 10:
         logger.debug(f"Too few points ({len(cloud)}) near ({x:.1f}, {y:.1f})")
@@ -163,6 +183,14 @@ def extract_terrain_features_at_point(x: float, y: float,
     except Exception as e:
         logger.debug(f"Grid interpolation failed at ({x:.1f}, {y:.1f}): {e}")
         return features
+
+    if dem is None:
+        return features
+
+    dem = np.where(np.isfinite(dem), dem, np.nan)
+    if np.count_nonzero(np.isfinite(dem)) < 25:
+        logger.debug(f"Insufficient finite DEM cells near ({x:.1f}, {y:.1f})")
+        return features
     
     # Extract features from DEM
     try:
@@ -181,6 +209,11 @@ def extract_terrain_features_at_point(x: float, y: float,
         features['z_mean'] = terrain_features['z_mean']
         features['z_std'] = terrain_features['z_std']
         features['z_range'] = terrain_features['z_range']
+
+        if not _are_features_finite(features):
+            logger.debug(f"Invalid terrain features (NaN/inf) at ({x:.1f}, {y:.1f})")
+            for col in FINITE_FEATURE_COLUMNS:
+                features[col] = np.nan
     
     except Exception as e:
         logger.debug(f"Feature extraction failed at ({x:.1f}, {y:.1f}): {e}")
@@ -226,12 +259,28 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
         raise ValueError(f"Required columns missing: {missing}")
     
     # Initialize terrain feature columns
-    feature_columns = [
-        'phi_lidar', 'phi_lidar_deg', 'tri', 'ruggedness',
-        'z_min', 'z_max', 'z_mean', 'z_std', 'z_range', 'n_points_used'
-    ]
+    feature_columns = FEATURE_COLUMNS
     for col in feature_columns:
         df[col] = np.nan
+
+    if not laz_dir.exists() or not laz_dir.is_dir():
+        logger.warning(f"LAZ directory not found or invalid: {laz_dir}. Skipping terrain feature computation.")
+        if output_path:
+            out = Path(output_path)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(out, index=False)
+            logger.info(f"Saved to: {out}")
+        return df
+
+    laz_inventory = next(laz_dir.glob("*.laz"), None)
+    if laz_inventory is None:
+        logger.warning(f"No LAZ files found in {laz_dir}. Skipping terrain feature computation.")
+        if output_path:
+            out = Path(output_path)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(out, index=False)
+            logger.info(f"Saved to: {out}")
+        return df
     
     # Get unique route points (deduplicate if needed)
     df = df.dropna(subset=['x_utm', 'y_utm'])
@@ -252,6 +301,10 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
     for i in tqdm(indices, desc="Extracting terrain features"):
         x = df.loc[i, 'x_utm']
         y = df.loc[i, 'y_utm']
+
+        if not np.isfinite(x) or not np.isfinite(y):
+            logger.debug(f"Skipping point with invalid coordinates at index {i}: ({x}, {y})")
+            continue
         
         # Find relevant LAZ tiles
         laz_tiles = find_relevant_laz_tiles(x, y, search_radius, laz_dir)
@@ -273,6 +326,12 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
         # Store in dataframe
         for col in feature_columns:
             df.loc[i, col] = features[col]
+
+    for col in feature_columns:
+        if col == 'n_points_used':
+            continue
+        finite_mask = np.isfinite(df[col])
+        df.loc[~finite_mask, col] = np.nan
     
     # Interpolate missing values (forward fill then backward fill)
     for col in feature_columns:
