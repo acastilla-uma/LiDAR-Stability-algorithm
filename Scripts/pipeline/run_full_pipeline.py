@@ -74,6 +74,18 @@ def main() -> int:
                        help="Search radius for terrain features (m)")
     parser.add_argument("--terrain-dem-size", type=int, default=256,
                        help="DEM grid size for feature extraction")
+    parser.add_argument("--build-enhanced-gt", action="store_true",
+                       help="Build sprint-5 enhanced ground truth from featured CSVs")
+    parser.add_argument("--enhanced-gt-output-dir", default="output/results/enhanced-ground-truth",
+                       help="Directory to write enhanced ground truth CSVs")
+    parser.add_argument("--train-w-model", action="store_true",
+                       help="Train sprint-5 RandomForest baseline to predict w from featured data")
+    parser.add_argument("--w-model-input-glob", default=None,
+                       help="Optional glob for w-model training data")
+    parser.add_argument("--w-model-out", default="output/results/w_model_rf.joblib",
+                       help="Output path for trained w model artifact")
+    parser.add_argument("--w-metrics-out", default="output/results/w_model_rf_metrics.json",
+                       help="Output path for training metrics JSON")
     args = parser.parse_args()
 
     args.data_dir = normalize_cli_path(args.data_dir)
@@ -173,6 +185,27 @@ def main() -> int:
 
         if args.skip_terrain_features:
             print("\n[SKIP] terrain feature extraction")
+
+        if args.build_enhanced_gt:
+            print("\n🧩 Building sprint-5 enhanced ground truth...")
+            run_cmd([
+                sys.executable,
+                "Scripts/pipeline/build_enhanced_ground_truth.py",
+                "--input-glob", f"{featured_dir.as_posix()}/{args.base}*.csv",
+                "--output-dir", str((repo_root / args.enhanced_gt_output_dir).resolve()),
+                "--overwrite",
+            ], cwd=repo_root)
+
+        if args.train_w_model:
+            print("\n🤖 Training sprint-5 baseline model for w prediction...")
+            input_glob = args.w_model_input_glob or f"{featured_dir.as_posix()}/{args.base}*.csv"
+            run_cmd([
+                sys.executable,
+                "Scripts/ml/train_w_model.py",
+                "--input-glob", input_glob,
+                "--output-model", str((repo_root / args.w_model_out).resolve()),
+                "--output-metrics", str((repo_root / args.w_metrics_out).resolve()),
+            ], cwd=repo_root)
 
         mapmatch_2d = find_best_csv_for_2d(args.base, featured_dir, mapmatched_dir)
         viz_input_dir = featured_dir if any(featured_dir.glob(f"{args.base}*.csv")) else mapmatched_dir

@@ -1,9 +1,13 @@
-"""Machine learning and statistical analysis module.
+"""Machine learning module for sprint 5 models and feature preparation."""
 
-Includes correlation analysis, statistical tests, and regression models.
-"""
+from .feature_engineering import (
+	DEFAULT_FEATURE_COLUMNS,
+	build_w_training_dataset,
+	load_featured_data,
+)
 
-from .correlation_lidar_si import LiDARSICorrelationAnalyzer
-from .analyze_csv_correlations import CSVCorrelationAnalyzer
-
-__all__ = ['LiDARSICorrelationAnalyzer', 'CSVCorrelationAnalyzer']
+__all__ = [
+	'DEFAULT_FEATURE_COLUMNS',
+	'build_w_training_dataset',
+	'load_featured_data',
+]

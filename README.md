@@ -2,6 +2,15 @@
 
 Pipeline práctico para procesar rutas y generar visualización final 2D + 3D.
 
+## Entrenamiento y evaluacion de modelos (Sprint 5)
+
+Documentacion completa:
+- `TRAINING_EVALUATION_GUIDE.md`
+
+Incluye:
+- Notebook de entrenamiento y evaluacion con graficas y metricas.
+- Script CLI para seleccionar datos, entrenar y guardar uno o varios modelos.
+
 ## Requisitos
 
 ```bash
@@ -67,22 +76,3 @@ Controles 3D:
 - Rotar: click + arrastrar
 - Zoom: rueda del ratón
 - Pan: Shift + click + arrastrar
-
-### 5) Descargar teselas CNIG LiDAR 3ª cobertura
-
-Usando la lista generada en `output/cnig_missing_tiles_all_doback.txt`:
-
-```bash
-python Scripts/lidar/download_cnig_lidar_tiles.py \
-  --list output/cnig_missing_tiles_all_doback.txt \
-  --dest LiDAR-Maps/cnig
-```
-
-Prueba en seco (sin descargar):
-
-```bash
-python Scripts/lidar/download_cnig_lidar_tiles.py \
-  --list output/cnig_missing_tiles_all_doback.txt \
-  --dry-run \
-  --max-files 10
-```
