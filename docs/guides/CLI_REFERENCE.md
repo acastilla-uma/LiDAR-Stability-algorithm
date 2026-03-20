@@ -83,6 +83,8 @@ python src/lidar_stability/pipeline/build_enhanced_ground_truth.py --help
 
 Funcion:
 - Genera ground truth enriquecido desde archivos featured.
+- Permite multiples corridas en una ejecucion con `--run-config` (hiperparametros por corrida).
+- Por defecto guarda en `output/models` con salida compacta (bundle comprimido + metricas consolidadas).
 
 ## LiDAR
 
@@ -176,6 +178,11 @@ Uso:
 ```bash
 python src/lidar_stability/ml/plot_models_leaderboard.py --help
 ```
+
+Funcion:
+- Lee todos los `*_metrics.json` de la carpeta indicada.
+- Genera tabla/plots y reporte HTML interactivo (`--html-file`, por defecto `leaderboard.html`).
+- Por defecto usa modo compacto: guarda HTML + JSON (menos archivos). Con `--no-compact-output` tambien exporta CSV y PNG.
 
 ## Physics
 

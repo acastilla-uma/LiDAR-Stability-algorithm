@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import sys
 from typing import Iterable
 
@@ -37,6 +39,30 @@ class TrainResult:
     r2_mean: float
     r2_std: float
     folds: list[dict]
+
+
+MODEL_HPARAM_KEYS = {
+    "rf": {
+        "rf_n_estimators",
+        "rf_min_samples_leaf",
+        "rf_max_depth",
+        "rf_max_features",
+    },
+    "extra_trees": {
+        "extra_trees_n_estimators",
+        "extra_trees_min_samples_leaf",
+        "extra_trees_max_depth",
+        "extra_trees_max_features",
+    },
+    "gbr": {
+        "gbr_n_estimators",
+        "gbr_learning_rate",
+        "gbr_max_depth",
+        "gbr_subsample",
+        "gbr_min_samples_leaf",
+        "gbr_min_samples_split",
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,13 +127,128 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument(
         "--output-dir",
-        default="src/lidar_stability/ml/models",
+        default="output/models",
         help="Directory where model artifacts and metrics will be saved",
     )
     parser.add_argument(
         "--prefix",
         default="w_model",
         help="File prefix for artifacts",
+    )
+    parser.add_argument(
+        "--compact-output",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "If true, stores all trained models in one compressed bundle and writes a single consolidated "
+            "metrics JSON file (fewer output files)."
+        ),
+    )
+    parser.add_argument(
+        "--artifact-compress",
+        type=int,
+        default=3,
+        help="Compression level for joblib artifacts (0-9). Higher is smaller but slower.",
+    )
+    parser.add_argument(
+        "--run-config",
+        action="append",
+        default=None,
+        help=(
+            "Repeatable JSON object (or Python dict literal) defining one training run. "
+            "Format: '{\"model\":\"rf\",\"run_id\":\"rf_400\",\"rf_n_estimators\":400}'. "
+            "If provided, --models is ignored and all run configs are trained."
+        ),
+    )
+
+    # RandomForest hyperparameters
+    parser.add_argument(
+        "--rf-n-estimators",
+        type=int,
+        default=400,
+        help="RandomForest: number of trees",
+    )
+    parser.add_argument(
+        "--rf-min-samples-leaf",
+        type=int,
+        default=2,
+        help="RandomForest: minimum samples required at leaf node",
+    )
+    parser.add_argument(
+        "--rf-max-depth",
+        type=int,
+        default=None,
+        help="RandomForest: maximum tree depth (None=unlimited)",
+    )
+    parser.add_argument(
+        "--rf-max-features",
+        type=str,
+        default="sqrt",
+        help="RandomForest: max features at each split (sqrt, log2, or int)",
+    )
+
+    # ExtraTrees hyperparameters
+    parser.add_argument(
+        "--extra-trees-n-estimators",
+        type=int,
+        default=500,
+        help="ExtraTrees: number of trees",
+    )
+    parser.add_argument(
+        "--extra-trees-min-samples-leaf",
+        type=int,
+        default=2,
+        help="ExtraTrees: minimum samples required at leaf node",
+    )
+    parser.add_argument(
+        "--extra-trees-max-depth",
+        type=int,
+        default=None,
+        help="ExtraTrees: maximum tree depth (None=unlimited)",
+    )
+    parser.add_argument(
+        "--extra-trees-max-features",
+        type=str,
+        default="sqrt",
+        help="ExtraTrees: max features at each split (sqrt, log2, or int)",
+    )
+
+    # GradientBoosting hyperparameters
+    parser.add_argument(
+        "--gbr-n-estimators",
+        type=int,
+        default=300,
+        help="GradientBoosting: number of boosting stages",
+    )
+    parser.add_argument(
+        "--gbr-learning-rate",
+        type=float,
+        default=0.05,
+        help="GradientBoosting: learning rate (shrinkage)",
+    )
+    parser.add_argument(
+        "--gbr-max-depth",
+        type=int,
+        default=3,
+        help="GradientBoosting: maximum tree depth",
+    )
+    parser.add_argument(
+        "--gbr-subsample",
+        type=float,
+        default=0.85,
+        help="GradientBoosting: fraction of samples used for fitting trees (0.0, 1.0]",
+    )
+    parser.add_argument(
+        "--gbr-min-samples-leaf",
+        type=int,
+        default=1,
+        help="GradientBoosting: minimum samples required at leaf node",
+    )
+    parser.add_argument(
+        "--gbr-min-samples-split",
+        type=int,
+        default=2,
+        help="GradientBoosting: minimum samples required to split internal node",
     )
 
     return parser.parse_args()
@@ -152,38 +293,180 @@ def resolve_input_files(args: argparse.Namespace, repo_root: Path) -> list[Path]
     return unique
 
 
-def build_model(model_key: str, random_state: int):
+def _parse_max_features(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    text = str(value).strip().lower()
+    if text in {"none", "null"}:
+        return None
+    if text in {"sqrt", "log2", "auto"}:
+        return text
+    try:
+        if "." in text:
+            return float(text)
+        return int(text)
+    except ValueError:
+        return str(value)
+
+
+def _collect_base_hyperparams(args: argparse.Namespace) -> dict:
+    hyperparams = {
+        key: value
+        for key, value in vars(args).items()
+        if key.startswith(("rf_", "extra_trees_", "gbr_"))
+    }
+    hyperparams["rf_max_features"] = _parse_max_features(hyperparams.get("rf_max_features"))
+    hyperparams["extra_trees_max_features"] = _parse_max_features(hyperparams.get("extra_trees_max_features"))
+    return hyperparams
+
+
+def _sanitize_run_id(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value).strip())
+    return safe.strip("_")
+
+
+def _effective_model_hyperparams(model_key: str, merged_hyperparams: dict) -> dict:
+    keys = MODEL_HPARAM_KEYS[model_key]
+    return {k: merged_hyperparams[k] for k in keys if k in merged_hyperparams}
+
+
+def build_training_runs(args: argparse.Namespace, base_hyperparams: dict) -> list[dict]:
+    runs: list[dict] = []
+
+    if args.run_config:
+        for idx, raw in enumerate(args.run_config, start=1):
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                try:
+                    payload = ast.literal_eval(raw)
+                except (ValueError, SyntaxError) as exc_eval:
+                    raise ValueError(
+                        f"Invalid JSON/object in --run-config #{idx}: {exc}"
+                    ) from exc_eval
+
+            if not isinstance(payload, dict):
+                raise ValueError(f"--run-config #{idx} must be a JSON object")
+
+            model_key = payload.get("model")
+            if model_key not in MODEL_HPARAM_KEYS:
+                raise ValueError(
+                    f"--run-config #{idx} must include 'model' in {sorted(MODEL_HPARAM_KEYS.keys())}"
+                )
+
+            run_id_raw = payload.get("run_id", f"run{idx:02d}")
+            run_id = _sanitize_run_id(run_id_raw)
+            if not run_id:
+                raise ValueError(f"Invalid empty run_id in --run-config #{idx}")
+
+            overrides = {k: v for k, v in payload.items() if k not in {"model", "run_id"}}
+            invalid_keys = sorted(k for k in overrides if k not in MODEL_HPARAM_KEYS[model_key])
+            if invalid_keys:
+                raise ValueError(
+                    f"--run-config #{idx} has invalid keys for model '{model_key}': {invalid_keys}"
+                )
+
+            merged_hyperparams = dict(base_hyperparams)
+            if "rf_max_features" in overrides:
+                overrides["rf_max_features"] = _parse_max_features(overrides["rf_max_features"])
+            if "extra_trees_max_features" in overrides:
+                overrides["extra_trees_max_features"] = _parse_max_features(overrides["extra_trees_max_features"])
+            merged_hyperparams.update(overrides)
+
+            runs.append(
+                {
+                    "model_key": model_key,
+                    "run_id": run_id,
+                    "hyperparams": merged_hyperparams,
+                }
+            )
+    else:
+        for model_key in args.models:
+            runs.append(
+                {
+                    "model_key": model_key,
+                    "run_id": "default",
+                    "hyperparams": dict(base_hyperparams),
+                }
+            )
+
+    seen_labels = set()
+    for run in runs:
+        label = (run["model_key"], run["run_id"])
+        if label in seen_labels:
+            raise ValueError(
+                "Duplicate run detected for model/run_id pair: "
+                f"{run['model_key']}/{run['run_id']}. Use unique run_id values."
+            )
+        seen_labels.add(label)
+
+    return runs
+
+
+def build_model(model_key: str, random_state: int, hyperparams: dict = None):
+    """Build a model with specified hyperparameters.
+    
+    Args:
+        model_key: 'rf', 'extra_trees', or 'gbr'
+        random_state: Random seed for reproducibility
+        hyperparams: Dict with model-specific hyperparameters (e.g., {'rf_n_estimators': 400})
+                     If None, uses default values.
+    """
+    if hyperparams is None:
+        hyperparams = {}
+
     if model_key == "rf":
         return RandomForestRegressor(
-            n_estimators=400,
+            n_estimators=hyperparams.get("rf_n_estimators", 400),
             random_state=random_state,
             n_jobs=-1,
-            min_samples_leaf=2,
+            min_samples_leaf=hyperparams.get("rf_min_samples_leaf", 2),
+            max_depth=hyperparams.get("rf_max_depth", None),
+            max_features=hyperparams.get("rf_max_features", "sqrt"),
         )
     if model_key == "extra_trees":
         return ExtraTreesRegressor(
-            n_estimators=500,
+            n_estimators=hyperparams.get("extra_trees_n_estimators", 500),
             random_state=random_state,
             n_jobs=-1,
-            min_samples_leaf=2,
+            min_samples_leaf=hyperparams.get("extra_trees_min_samples_leaf", 2),
+            max_depth=hyperparams.get("extra_trees_max_depth", None),
+            max_features=hyperparams.get("extra_trees_max_features", "sqrt"),
         )
     if model_key == "gbr":
         return GradientBoostingRegressor(
             random_state=random_state,
-            n_estimators=300,
-            learning_rate=0.05,
-            max_depth=3,
-            subsample=0.85,
+            n_estimators=hyperparams.get("gbr_n_estimators", 300),
+            learning_rate=hyperparams.get("gbr_learning_rate", 0.05),
+            max_depth=hyperparams.get("gbr_max_depth", 3),
+            subsample=hyperparams.get("gbr_subsample", 0.85),
+            min_samples_leaf=hyperparams.get("gbr_min_samples_leaf", 1),
+            min_samples_split=hyperparams.get("gbr_min_samples_split", 2),
         )
     raise ValueError(f"Unknown model key: {model_key}")
 
 
-def train_kfold(model_key: str, X: pd.DataFrame, y: pd.Series, n_splits: int, random_state: int):
+def train_kfold(model_key: str, X: pd.DataFrame, y: pd.Series, n_splits: int, random_state: int, hyperparams: dict = None):
+    """Train model with K-Fold cross-validation.
+    
+    Args:
+        model_key: 'rf', 'extra_trees', or 'gbr'
+        X: Features dataframe
+        y: Target series
+        n_splits: Number of K-Fold splits
+        random_state: Random seed
+        hyperparams: Dict with model-specific hyperparameters
+    """
+    if hyperparams is None:
+        hyperparams = {}
+
     splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
     fold_metrics: list[dict] = []
     for fold_idx, (train_idx, test_idx) in enumerate(splitter.split(X), start=1):
-        model = build_model(model_key, random_state + fold_idx)
+        model = build_model(model_key, random_state + fold_idx, hyperparams)
         model.fit(X.iloc[train_idx], y.iloc[train_idx])
 
         y_pred = model.predict(X.iloc[test_idx])
@@ -194,7 +477,7 @@ def train_kfold(model_key: str, X: pd.DataFrame, y: pd.Series, n_splits: int, ra
         r2 = float(r2_score(y_true, y_pred))
         fold_metrics.append({"fold": fold_idx, "rmse": rmse, "mae": mae, "r2": r2})
 
-    final_model = build_model(model_key, random_state)
+    final_model = build_model(model_key, random_state, hyperparams)
     final_model.fit(X, y)
 
     rmse_values = [m["rmse"] for m in fold_metrics]
@@ -249,29 +532,64 @@ def main() -> int:
     out_dir = (repo_root / args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    base_hyperparams = _collect_base_hyperparams(args)
+    training_runs = build_training_runs(args, base_hyperparams)
+
+    compact_output = bool(args.compact_output)
+    compression = int(args.artifact_compress)
+    if compression < 0 or compression > 9:
+        raise ValueError("--artifact-compress must be between 0 and 9")
+
+    bundle_path = out_dir / f"{args.prefix}_models.joblib"
+    bundle_metrics_path = out_dir / f"{args.prefix}_metrics.json"
+    bundled_artifacts: dict[str, dict] = {}
+    consolidated_metrics: list[dict] = []
+
     leaderboard = []
-    for model_key in args.models:
+    for run in training_runs:
+        model_key = run["model_key"]
+        run_id = run["run_id"]
+        hyperparams = run["hyperparams"]
+
         model, result = train_kfold(
             model_key=model_key,
             X=X,
             y=y,
             n_splits=n_splits,
             random_state=int(args.random_state),
+            hyperparams=hyperparams,
         )
 
-        model_path = out_dir / f"{args.prefix}_{model_key}.joblib"
-        metrics_path = out_dir / f"{args.prefix}_{model_key}_metrics.json"
+        if run_id == "default" and not args.run_config:
+            artifact_key = model_key
+        else:
+            artifact_key = f"{model_key}@{run_id}"
+
+        if compact_output:
+            model_path = f"{bundle_path}::{artifact_key}"
+            metrics_path = str(bundle_metrics_path)
+        elif run_id == "default" and not args.run_config:
+            model_path = out_dir / f"{args.prefix}_{model_key}.joblib"
+            metrics_path = out_dir / f"{args.prefix}_{model_key}_metrics.json"
+        else:
+            model_path = out_dir / f"{args.prefix}_{model_key}_{run_id}.joblib"
+            metrics_path = out_dir / f"{args.prefix}_{model_key}_{run_id}_metrics.json"
 
         artifact = {
             "model": model,
             "feature_columns": used_features,
             "target_name": "omega_rad_s",
             "model_key": model_key,
+            "run_id": run_id,
         }
-        dump(artifact, model_path)
+        if compact_output:
+            bundled_artifacts[artifact_key] = artifact
+        else:
+            dump(artifact, model_path, compress=compression)
 
         payload = {
             "model": model_key,
+            "run_id": run_id,
             "input_glob": args.input_glob,
             "input_files": args.input_files,
             "contains": args.contains,
@@ -291,12 +609,23 @@ def main() -> int:
             "r2_std": result.r2_std,
             "folds": result.folds,
             "model_path": str(model_path),
+            "artifact_key": artifact_key,
+            "run_config": {
+                "model": model_key,
+                "run_id": run_id,
+                "hyperparameters": _effective_model_hyperparams(model_key, hyperparams),
+            },
         }
-        metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        if compact_output:
+            consolidated_metrics.append(payload)
+        else:
+            metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
         leaderboard.append(
             {
                 "model": model_key,
+                "run_id": run_id,
+                "label": f"{model_key}@{run_id}" if run_id != "default" else model_key,
                 "rmse_mean": result.rmse_mean,
                 "mae_mean": result.mae_mean,
                 "r2_mean": result.r2_mean,
@@ -305,7 +634,7 @@ def main() -> int:
             }
         )
 
-        print(f"\n[{model_key}] training completed")
+        print(f"\n[{model_key} | run_id={run_id}] training completed")
         print(f"  samples={result.n_samples} features={result.n_features}")
         print(f"  RMSE={result.rmse_mean:.6f} +- {result.rmse_std:.6f}")
         print(f"  MAE={result.mae_mean:.6f} +- {result.mae_std:.6f}")
@@ -313,8 +642,29 @@ def main() -> int:
         print(f"  model: {model_path}")
         print(f"  metrics: {metrics_path}")
 
+    if compact_output:
+        bundle_payload = {
+            "format": "bundle_v1",
+            "prefix": args.prefix,
+            "n_models": len(bundled_artifacts),
+            "artifacts": bundled_artifacts,
+        }
+        dump(bundle_payload, bundle_path, compress=compression)
+
+        compact_metrics_payload = {
+            "format": "compact_metrics_v1",
+            "prefix": args.prefix,
+            "n_runs": len(consolidated_metrics),
+            "runs": consolidated_metrics,
+        }
+        bundle_metrics_path.write_text(json.dumps(compact_metrics_payload), encoding="utf-8")
+
+        print("\nCompact output enabled")
+        print(f"  model bundle: {bundle_path}")
+        print(f"  consolidated metrics: {bundle_metrics_path}")
+
     leaderboard_path = out_dir / f"{args.prefix}_leaderboard.json"
-    leaderboard_path.write_text(json.dumps(leaderboard, indent=2), encoding="utf-8")
+    leaderboard_path.write_text(json.dumps(leaderboard), encoding="utf-8")
     print(f"\nLeaderboard saved: {leaderboard_path}")
 
     return 0

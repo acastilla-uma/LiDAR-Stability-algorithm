@@ -36,7 +36,13 @@ Permite:
 - Seleccionar datos por glob, lista de archivos, filtros por nombre y limite de archivos.
 - Filtrar filas por condicion (`pandas.query`).
 - Entrenar uno o varios modelos.
+- Ejecutar varias corridas con hiperparametros distintos en una sola llamada (`--run-config`).
 - Guardar modelos, metricas y leaderboard comparativo.
+
+Salida por defecto (compacta):
+- Carpeta: `output/models`
+- Un bundle comprimido de modelos: `<prefix>_models.joblib`
+- Un JSON consolidado de metricas: `<prefix>_metrics.json`
 
 ### Modelos soportados
 
@@ -93,6 +99,28 @@ python src/lidar_stability/ml/train_models_cli.py \
   --prefix "w_smoke"
 ```
 
+### 3.5 Entrenar varias corridas con hiperparametros diferentes
+
+Ejemplo en PowerShell (diccionario por corrida):
+
+```bash
+python src/lidar_stability/ml/train_models_cli.py \
+  --input-glob "Doback-Data/featured/DOBACK024_20250929_seg*.csv" \
+  --max-files 1 \
+  --n-splits 2 \
+  --output-dir "output/results/models_multirun" \
+  --prefix "w_multi" \
+  --run-config "{'model':'rf','run_id':'rf_200','rf_n_estimators':200,'rf_min_samples_leaf':2}" \
+  --run-config "{'model':'rf','run_id':'rf_500','rf_n_estimators':500,'rf_min_samples_leaf':4}" \
+  --run-config "{'model':'gbr','run_id':'gbr_120','gbr_n_estimators':120,'gbr_learning_rate':0.08}"
+```
+
+Cada corrida genera artefactos separados con `run_id`:
+- `<output-dir>/<prefix>_<model>_<run_id>.joblib`
+- `<output-dir>/<prefix>_<model>_<run_id>_metrics.json`
+
+Nota: esos archivos por corrida se generan solo con `--no-compact-output`.
+
 ## 4) Parametros importantes del CLI
 
 - `--input-glob`: uno o varios patrones de CSV.
@@ -102,6 +130,7 @@ python src/lidar_stability/ml/train_models_cli.py \
 - `--shuffle-files`: mezcla orden de archivos antes de cortar con `--max-files`.
 - `--query`: filtro de filas tipo pandas (`"speed_kmh > 10"`).
 - `--models`: lista de modelos a entrenar (`rf extra_trees gbr`).
+- `--run-config`: corrida repetible con JSON/diccionario por corrida (si se usa, reemplaza `--models`).
 - `--n-splits`: folds para validacion cruzada.
 - `--target-column`: target explicito (si no, autodeteccion).
 - `--feature-columns`: lista de columnas de entrada (opcional).
@@ -116,6 +145,10 @@ Por cada modelo entrenado:
 
 Comparativa global:
 - `<output-dir>/<prefix>_leaderboard.json`
+
+Reporte HTML interactivo (script leaderboard):
+- `python src/lidar_stability/ml/plot_models_leaderboard.py --metrics-dir <output-dir> --output-dir <output-dir> --html-file leaderboard.html`
+- Salida: `<output-dir>/leaderboard.html`
 
 Ejemplo real (smoke):
 - `output/results/models_smoke/w_smoke_rf.joblib`
