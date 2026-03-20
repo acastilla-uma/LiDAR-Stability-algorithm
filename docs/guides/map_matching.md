@@ -1,5 +1,11 @@
 # Map Matching Guide
 
+CLI principal:
+
+```bash
+python src/lidar_stability/parsers/map_matching.py --help
+```
+
 ## Overview
 Map matching aligns noisy GPS observations to the most plausible road geometry in a driveable road network. In this repository, the implementation targets DOBACK routes and produces corrected coordinates for downstream terrain and stability analysis.
 
@@ -68,10 +74,16 @@ If many unmatched points (`edge_id = -1`):
 ## Pipeline Integration
 Map matching stage is executed before terrain feature extraction:
 
-1. `batch_processor.py` generates processed route CSV files.
-2. `map_matching.py` snaps points to road network.
-3. `compute_route_terrain_features.py` enriches matched points.
+1. `src/lidar_stability/parsers/batch_processor.py` generates processed route CSV files.
+2. `src/lidar_stability/parsers/map_matching.py` snaps points to road network.
+3. `src/lidar_stability/lidar/compute_route_terrain_features.py` enriches matched points.
 4. ML and visualization pipelines consume the enriched data.
+
+Folder conventions:
+
+- Input processed routes: `Doback-Data/processed-data`
+- Output map-matched routes: `Doback-Data/map-matched`
+- Network cache/reporting: `output/`
 
 ## Runtime Notes
 - Initial network build can be slower; subsequent runs reuse cache.

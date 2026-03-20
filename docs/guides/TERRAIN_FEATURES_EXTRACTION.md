@@ -1,5 +1,21 @@
 # Extracción de Características de Terreno (Task 3.4): Documentación Técnica Completa
 
+Implementacion actual (scripts CLI y modulo):
+
+- `src/lidar_stability/lidar/compute_route_terrain_features.py`
+- `src/lidar_stability/lidar/terrain_features.py`
+
+Comando base:
+
+```bash
+python src/lidar_stability/lidar/compute_route_terrain_features.py --help
+```
+
+Nota operativa de rendimiento:
+
+- Para validaciones rapidas usar `--sampling` alto y `--dem-size` menor.
+- Para produccion usar valores por defecto y ejecutar por lotes.
+
 ## Tabla de Contenidos
 1. [Introducción](#introducción)
 2. [Visión General](#visión-general)
@@ -553,7 +569,7 @@ Típicamente:
 ### Estructura de Carpetas
 
 ```
-Scripts/
+src/lidar_stability/
 ├── lidar/
 │   ├── laz_reader.py              # Lectura LAZ
 │   ├── terrain_features.py         # Clase TerrainFeatureExtractor
@@ -596,13 +612,13 @@ def enrich_route_with_terrain_features(
 
 ```bash
 # Process single file
-python Scripts/lidar/compute_route_terrain_features.py \
+python src/lidar_stability/lidar/compute_route_terrain_features.py \
     --mapmatch Doback-Data/map-matched/DOBACK024_20251009_seg87.csv \
     --laz-dir LiDAR-Maps/cnig \
     --output Doback-Data/featured/DOBACK024_20251009_seg87.csv
 
 # Full pipeline
-python Scripts/pipeline/run_full_pipeline.py \
+python src/lidar_stability/pipeline/run_full_pipeline.py \
     --base DOBACK024_20251009_seg87 \
     --terrain-search-radius 100 \
     --terrain-dem-size 256

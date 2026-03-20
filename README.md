@@ -1,78 +1,92 @@
 # LiDAR Stability Algorithm
 
-Pipeline práctico para procesar rutas y generar visualización final 2D + 3D.
+Pipeline para procesar rutas DOBACK con datos GPS/estabilidad, hacer map-matching, enriquecer con terreno LiDAR y generar salidas de visualizacion y modelado.
 
-## Entrenamiento y evaluacion de modelos (Sprint 5)
+## Estado actual
 
-Documentacion completa:
-- `TRAINING_EVALUATION_GUIDE.md`
+- Estructura de codigo consolidada en `src/lidar_stability`.
+- Flujo principal operativo: `processed-data -> map-matched -> featured`.
+- Scripts CLI actualizados para resolver rutas del repo correctamente tras la reorganizacion.
+- Extraccion de features de terreno optimizada para reducir tiempo de ejecucion.
 
-Incluye:
-- Notebook de entrenamiento y evaluacion con graficas y metricas.
-- Script CLI para seleccionar datos, entrenar y guardar uno o varios modelos.
-
-## Requisitos
+## Instalacion
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Comando único (raw → processed-data → map-matched → featured → 2D + 3D)
+## Pipeline completo recomendado
 
 ```bash
-python Scripts/pipeline/run_full_pipeline.py \
+python src/lidar_stability/pipeline/run_full_pipeline.py \
   --base DOBACK024_20250929 \
   --data-dir Doback-Data \
   --processed-dir Doback-Data/processed-data \
   --mapmatched-dir Doback-Data/map-matched \
   --featured-dir Doback-Data/featured \
   --output-dir output \
+  --laz-dir LiDAR-Maps/cnig \
   --points-sample 700000
 ```
 
-Salida final:
+Salidas esperadas:
+
 - `Doback-Data/processed-data/*.csv`
 - `Doback-Data/map-matched/*.csv`
 - `Doback-Data/featured/*.csv`
 - `output/<BASE>_final_2d.png`
 - `output/<BASE>_final_3d.html`
 
-## Pasos manuales (opcional)
+## Flujo por etapas
 
-### 1) Raw → processed-data
+1. Procesado batch de crudos:
 
 ```bash
-python Scripts/parsers/batch_processor.py \
+python src/lidar_stability/parsers/batch_processor.py \
   --data-dir Doback-Data \
   --output-dir Doback-Data/processed-data
 ```
 
-### 2) processed-data → map-matched
+2. Map-matching:
 
 ```bash
-python Scripts/parsers/map_matching.py \
+python src/lidar_stability/parsers/map_matching.py \
   --input Doback-Data/processed-data \
   --output Doback-Data/map-matched
 ```
 
-### 3) Visualización 2D
+3. Enriquecimiento de features de terreno:
 
 ```bash
-python Scripts/visualization/visualize_route_lidar.py \
+python src/lidar_stability/lidar/compute_route_terrain_features.py \
+  --mapmatch Doback-Data/map-matched/DOBACK024_20250929_seg11.csv \
+  --laz-dir LiDAR-Maps/cnig \
+  --output Doback-Data/featured/DOBACK024_20250929_seg11.csv
+```
+
+4. Visualizacion 2D:
+
+```bash
+python src/lidar_stability/visualization/visualize_route_lidar.py \
   --mapmatch Doback-Data/featured/DOBACK024_20250929_seg11.csv \
   --output output/ruta_seg11_2d.png
 ```
 
-### 4) Visualización 3D interactiva
+5. Visualizacion 3D:
 
 ```bash
-python Scripts/visualization/visualize_3d_interactive.py \
+python src/lidar_stability/visualization/visualize_3d_interactive.py \
   --base DOBACK024_20250929 \
   --points-sample 700000 \
   --output output/ruta_3d_DOBACK024_20250929.html
 ```
 
-Controles 3D:
-- Rotar: click + arrastrar
-- Zoom: rueda del ratón
-- Pan: Shift + click + arrastrar
+## Documentacion
+
+- `docs/QUICK_START.md`
+- `docs/PROJECT_STATUS.md`
+- `docs/ROADMAP.md`
+- `docs/guides/map_matching.md`
+- `docs/guides/TERRAIN_FEATURES_EXTRACTION.md`
+- `docs/guides/TRAINING_EVALUATION_GUIDE.md`
+- `docs/guides/CLI_REFERENCE.md`

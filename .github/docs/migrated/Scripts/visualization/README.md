@@ -1,5 +1,7 @@
 # Scripts de Visualización - LiDAR Stability Algorithm
 
+> Documento migrado/historico. Los entrypoints activos estan en `src/lidar_stability/visualization`.
+
 Scripts auxiliares para visualizar datos LiDAR, GPS y estabilidad del proyecto PIML.
 
 ## 📁 Contenido
@@ -137,7 +139,7 @@ python visualize_all.py "path/to/dtm.tif" "Doback-Data/GPS/GPS_DOBACK027_2025081
 
 ### Ejemplo 1: Exploración rápida de un tile LAZ
 ```bash
-cd scripts/visualization
+cd src/lidar_stability/visualization
 python visualize_laz.py "../../LiDAR-Maps/cnig/PNOA_2024_MAD_444-4486_NPC01.laz" --mode 2d --color elevation --sample 0.5
 ```
 

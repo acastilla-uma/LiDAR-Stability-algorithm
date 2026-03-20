@@ -1,5 +1,7 @@
 # Reorganización del Repositorio - Stage 0 → Sprint 1
 
+> Documento historico. Para estado vigente consultar `docs/PROJECT_STATUS.md`, `docs/ROADMAP.md` y `CHANGELOG.md`.
+
 **Última Actualización:** 26 de Febrero, 2026  
 **Estado:** Stage 0 integrado en Sprint 1 (Batch Processing como parte de Sprint 1)
 

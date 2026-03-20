@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Documentation and Path Consolidation] - 2026-03-20
+
+### Changed
+- Repository execution paths aligned to `src/lidar_stability` entrypoints.
+- Deprecated references to old `Scripts/...` locations replaced in active docs.
+- Canonical processed routes folder standardized as `Doback-Data/processed-data`.
+
+### Added
+- Central CLI reference guide in `docs/guides/CLI_REFERENCE.md` for previously under-documented scripts.
+
+### Fixed
+- Root/base path resolution in multiple CLI modules after repository reorganization.
+- Audit summary behavior and defaults in coverage tooling documentation.
+
+### Note
+- This file is preserved as historical project log in `.github/`.
+- The canonical active changelog is `CHANGELOG.md` at repository root.
+
+---
+
 ## [Sprint 1 Reorganization] - 2026-02-26
 
 ### 🔄 Changed - Stage 0 Integrated into Sprint 1

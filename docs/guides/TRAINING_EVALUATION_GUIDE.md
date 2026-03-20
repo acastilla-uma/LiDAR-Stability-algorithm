@@ -30,7 +30,7 @@ Contenido del notebook:
 ## 2) Script CLI para entrenar y guardar modelos
 
 Script:
-- `Scripts/ml/train_models_cli.py`
+- `src/lidar_stability/ml/train_models_cli.py`
 
 Permite:
 - Seleccionar datos por glob, lista de archivos, filtros por nombre y limite de archivos.
@@ -49,7 +49,7 @@ Permite:
 ### 3.1 Entrenar un solo modelo con todos los featured
 
 ```bash
-python Scripts/ml/train_models_cli.py \
+python src/lidar_stability/ml/train_models_cli.py \
   --input-glob "Doback-Data/featured/DOBACK*.csv" \
   --models rf \
   --n-splits 5 \
@@ -60,7 +60,7 @@ python Scripts/ml/train_models_cli.py \
 ### 3.2 Entrenar y comparar varios modelos
 
 ```bash
-python Scripts/ml/train_models_cli.py \
+python src/lidar_stability/ml/train_models_cli.py \
   --input-glob "Doback-Data/featured/DOBACK024_20250929_seg*.csv" \
   --models rf extra_trees gbr \
   --n-splits 5 \
@@ -71,7 +71,7 @@ python Scripts/ml/train_models_cli.py \
 ### 3.3 Elegir subconjunto de archivos y filtrar filas
 
 ```bash
-python Scripts/ml/train_models_cli.py \
+python src/lidar_stability/ml/train_models_cli.py \
   --input-glob "Doback-Data/featured/DOBACK*.csv" \
   --contains DOBACK024 20250929 \
   --max-files 3 \
@@ -85,7 +85,7 @@ python Scripts/ml/train_models_cli.py \
 ### 3.4 Entrenar con archivo especifico (smoke test)
 
 ```bash
-python Scripts/ml/train_models_cli.py \
+python src/lidar_stability/ml/train_models_cli.py \
   --input-glob "Doback-Data/featured/DOBACK024_20250929_seg13.csv" \
   --models rf extra_trees \
   --n-splits 3 \
@@ -137,6 +137,6 @@ Se reportan:
 ## 7) Flujo recomendado en proyecto
 
 1. Explorar y ajustar en notebook (`var-analysis/guia_entrenamiento_evaluacion_sprint5.ipynb`).
-2. Ejecutar entrenamiento reproducible con CLI (`Scripts/ml/train_models_cli.py`).
+2. Ejecutar entrenamiento reproducible con CLI (`src/lidar_stability/ml/train_models_cli.py`).
 3. Revisar `leaderboard` y elegir modelo.
 4. Usar artefacto seleccionado para integracion en pipeline de SI dinamico.
