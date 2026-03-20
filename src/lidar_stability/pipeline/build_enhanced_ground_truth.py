@@ -10,9 +10,9 @@ from pathlib import Path
 import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SCRIPTS_ROOT = SCRIPT_DIR.parent
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
+SRC_ROOT = SCRIPT_DIR.parent.parent
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from lidar_stability.physics import StabilityEngine
 from lidar_stability.pipeline.ground_truth import build_enhanced_ground_truth
@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
 
     csv_paths = sorted(repo_root.glob(args.input_glob))
     if not csv_paths:

@@ -61,7 +61,7 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # Rutas por defecto
 # ---------------------------------------------------------------------------
-BASE            = Path(__file__).resolve().parents[2]
+BASE            = Path(__file__).resolve().parents[3]
 DEFAULT_NETWORK = BASE / "output" / "road_network.graphml"
 DEFAULT_INPUT   = BASE / "Doback-Data" / "processed-data"
 DEFAULT_OUTPUT  = BASE / "Doback-Data" / "map-matched"

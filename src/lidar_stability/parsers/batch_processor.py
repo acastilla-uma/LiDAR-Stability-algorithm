@@ -10,7 +10,7 @@ Default input:
   Doback-Data/Stability
 
 Default output:
-  Doback-Data/processed data
+    Doback-Data/processed-data
 
 Usage:
   python src/lidar_stability/process_doback_routes.py
@@ -476,7 +476,7 @@ def main():
     )
     parser.add_argument(
         "--output-dir",
-        default="Doback-Data/processed data",
+        default="Doback-Data/processed-data",
         help="Output directory for processed routes",
     )
     parser.add_argument(
@@ -499,7 +499,7 @@ def main():
 
     args = parser.parse_args()
 
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[3]
     data_dir = (project_root / args.data_dir).resolve()
     output_dir = (project_root / args.output_dir).resolve()
 

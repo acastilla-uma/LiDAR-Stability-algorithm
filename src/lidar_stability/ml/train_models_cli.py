@@ -18,9 +18,9 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import KFold
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SCRIPTS_ROOT = SCRIPT_DIR.parent
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
+SRC_ROOT = SCRIPT_DIR.parent.parent
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from lidar_stability.ml.feature_engineering import build_w_training_dataset, load_featured_data
 
@@ -114,7 +114,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def find_repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _iter_paths_from_globs(repo_root: Path, patterns: Iterable[str]) -> list[Path]:

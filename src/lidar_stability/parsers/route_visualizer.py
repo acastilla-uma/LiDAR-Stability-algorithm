@@ -4,9 +4,9 @@ Visualize a DOBACK route on a real map colored by stability index.
 Input must be a CSV file with columns: timestamp, lat, lon, si (or si_total).
 
 Usage:
-  python src/lidar_stability/visualize_doback_route.py "Doback-Data/processed data/DOBACK024_20251020.csv"
+    python src/lidar_stability/visualize_doback_route.py "Doback-Data/processed-data/DOBACK024_20251020.csv"
   python src/lidar_stability/visualize_doback_route.py "file1.csv" "file2.csv" "file3.csv"
-  python src/lidar_stability/visualize_doback_route.py "Doback-Data/processed data/DOBACK024_20251020.csv" --output custom.html
+    python src/lidar_stability/visualize_doback_route.py "Doback-Data/processed-data/DOBACK024_20251020.csv" --output custom.html
 """
 
 import argparse
@@ -273,7 +273,7 @@ def main():
         epilog="Ejemplos:\n"
                "  %(prog)s file1.csv file2.csv\n"
                "  %(prog)s DOBACK024_20250929  # Busca todos los segmentos automÃ¡ticamente\n"
-               "  %(prog)s \"Doback-Data/processed data/DOBACK024_20250929\"",
+               "  %(prog)s \"Doback-Data/processed-data/DOBACK024_20250929\"",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("csv_files", nargs="+", help="Archivo(s) CSV o nombre base para buscar segmentos automÃ¡ticamente")
@@ -290,7 +290,7 @@ def main():
 
     args = parser.parse_args()
     
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[3]
     default_output = project_root / "output" / "mapa_ruta_si.html"
     output_path = Path(args.output).resolve() if args.output else default_output
     output_path.parent.mkdir(parents=True, exist_ok=True)

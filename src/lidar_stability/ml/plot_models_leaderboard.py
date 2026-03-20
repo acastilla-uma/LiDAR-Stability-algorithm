@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def find_repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def load_metrics(metrics_dir: Path) -> pd.DataFrame:

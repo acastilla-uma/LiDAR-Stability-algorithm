@@ -96,7 +96,7 @@ def main() -> int:
     args.laz_dir = normalize_cli_path(args.laz_dir)
     args.tif_dir = normalize_cli_path(args.tif_dir)
 
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     data_dir = (repo_root / args.data_dir).resolve()
     processed_dir = (repo_root / args.processed_dir).resolve()
     mapmatched_dir = (repo_root / args.mapmatched_dir).resolve()

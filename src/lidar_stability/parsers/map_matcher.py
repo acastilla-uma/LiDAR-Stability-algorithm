@@ -54,7 +54,7 @@ class MapMatcher:
         try:
             import networkx as nx
             
-            cache_file = Path(__file__).parent.parent.parent / "output" / "road_network.graphml"
+            cache_file = Path(__file__).resolve().parents[3] / "output" / "road_network.graphml"
             
             if cache_file.exists():
                 logger.info(f"Loading cached road network from {cache_file}")

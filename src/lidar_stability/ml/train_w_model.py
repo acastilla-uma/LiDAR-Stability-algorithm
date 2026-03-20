@@ -16,9 +16,9 @@ from sklearn.model_selection import KFold
 
 # Ensure package imports work when executed as a script from repo root.
 SCRIPT_DIR = Path(__file__).resolve().parent
-SCRIPTS_ROOT = SCRIPT_DIR.parent
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
+SRC_ROOT = SCRIPT_DIR.parent.parent
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from lidar_stability.ml.feature_engineering import build_w_training_dataset, load_featured_data
 
@@ -103,7 +103,7 @@ def parse_args():
 def main() -> int:
     args = parse_args()
 
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     csv_paths = sorted(repo_root.glob(args.input_glob))
     if not csv_paths:
         raise FileNotFoundError(f'No input files found with pattern: {args.input_glob}')

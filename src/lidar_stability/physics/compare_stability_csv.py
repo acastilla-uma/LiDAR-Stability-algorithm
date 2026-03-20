@@ -17,10 +17,10 @@ import numpy as np
 import pandas as pd
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS_ROOT = REPO_ROOT / "Scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from lidar_stability.physics import StabilityEngine
 
@@ -310,7 +310,7 @@ def main() -> int:
     parser.add_argument("--time-col", default=None, help="Columna temporal para eje X")
     parser.add_argument(
         "--config",
-        default=str(REPO_ROOT / "Scripts" / "config" / "vehicle.yaml"),
+        default=str(REPO_ROOT / "src" / "lidar_stability" / "config" / "vehicle.yaml"),
         help="Ruta a vehicle.yaml",
     )
     parser.add_argument(

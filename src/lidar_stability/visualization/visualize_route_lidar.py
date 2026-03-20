@@ -13,8 +13,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.colors import sample_colorscale
 
-SCRIPT_DIR = Path(__file__).parent
-sys.path.insert(0, str(SCRIPT_DIR.parent))
+SCRIPT_DIR = Path(__file__).resolve().parent
+SRC_ROOT = SCRIPT_DIR.parent.parent
+sys.path.insert(0, str(SRC_ROOT))
 
 from lidar_stability.lidar.laz_reader import LAZReader
 
@@ -89,7 +90,7 @@ def visualize_route_on_lidar(mapmatch_path: str, laz_dir: str = None, tif_dir: s
     if not mapmatch_path.exists():
         raise FileNotFoundError(f"Map-matched file not found: {mapmatch_path}")
 
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).resolve().parents[3]
     laz_dir = Path(laz_dir) if laz_dir else project_root / "LiDAR-Maps" / "cnig"
 
     df = pd.read_csv(mapmatch_path)

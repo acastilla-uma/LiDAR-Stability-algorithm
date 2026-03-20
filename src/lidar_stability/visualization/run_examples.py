@@ -13,7 +13,7 @@ import sys
 import glob
 
 # Rutas base del proyecto
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 LAZ_DIR = os.path.join(BASE_DIR, "LiDAR-Maps", "cnig")
 GPS_DIR = os.path.join(BASE_DIR, "Doback-Data", "GPS")
 STABILITY_DIR = os.path.join(BASE_DIR, "Doback-Data", "Stability")

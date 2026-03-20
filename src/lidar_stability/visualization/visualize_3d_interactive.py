@@ -12,8 +12,9 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-SCRIPT_DIR = Path(__file__).parent
-sys.path.insert(0, str(SCRIPT_DIR.parent))
+SCRIPT_DIR = Path(__file__).resolve().parent
+SRC_ROOT = SCRIPT_DIR.parent.parent
+sys.path.insert(0, str(SRC_ROOT))
 
 from lidar_stability.visualization.visualize_route_lidar import find_laz_tiles, load_laz_as_points, deduplicate_route
 
@@ -34,7 +35,7 @@ def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: 
                              points_sample: int = 50_000, stability_col: str = "si",
                              output_path: str = None, filter_ground: bool = True,
                              padding_m: float = 100.0, show_terrain_features: bool = True):
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).resolve().parents[3]
     if mapmatch_dir:
         mapmatch_dir = Path(mapmatch_dir)
     else:

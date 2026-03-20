@@ -37,8 +37,9 @@ import pandas as pd
 from scipy.interpolate import griddata
 from tqdm import tqdm
 
-SCRIPT_DIR = Path(__file__).parent
-sys.path.insert(0, str(SCRIPT_DIR.parent))
+SCRIPT_DIR = Path(__file__).resolve().parent
+SRC_ROOT = SCRIPT_DIR.parent.parent
+sys.path.insert(0, str(SRC_ROOT))
 
 from lidar_stability.lidar.laz_reader import LAZReader
 from lidar_stability.lidar.terrain_features import TerrainFeatureExtractor
@@ -272,7 +273,7 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
     if not mapmatch_path.exists():
         raise FileNotFoundError(f"Map-matched file not found: {mapmatch_path}")
     
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).resolve().parents[3]
     laz_dir = Path(laz_dir) if laz_dir else project_root / "LiDAR-Maps" / "cnig"
     
     logger.info(f"Loading map-matched data: {mapmatch_path}")
@@ -428,7 +429,7 @@ def enrich_doback_batch(doback: str,
                         vehicle_track: float = 2.48,
                         sampling: int = 1) -> tuple[int, int]:
     """Process all map-matched CSV files for a given DOBACK ID."""
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).resolve().parents[3]
     doback_id = normalize_doback_id(doback)
     mapmatch_root = Path(mapmatch_dir) if mapmatch_dir else project_root / "Doback-Data" / "map-matched"
     featured_root = Path(featured_dir) if featured_dir else project_root / "Doback-Data" / "featured"
@@ -492,7 +493,7 @@ def main():
             if args.output:
                 output = args.output
             else:
-                project_root = Path(__file__).parent.parent.parent
+                project_root = Path(__file__).resolve().parents[3]
                 output = str(project_root / "Doback-Data" / "featured" / mapmatch_path.name)
 
             enrich_route_with_terrain_features(

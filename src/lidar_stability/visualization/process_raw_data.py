@@ -284,7 +284,7 @@ def main():
     
     if args.all:
         # Procesar todos los archivos
-        project_root = Path(__file__).parent.parent.parent
+        project_root = Path(__file__).resolve().parents[3]
         gps_dir = project_root / "Doback-Data" / "GPS"
         stab_dir = project_root / "Doback-Data" / "Stability"
         
