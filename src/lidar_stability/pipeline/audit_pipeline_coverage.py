@@ -27,7 +27,17 @@ from pathlib import Path
 from typing import Iterable
 
 
-BASE = Path(__file__).resolve().parents[2]
+def _resolve_project_base() -> Path:
+    """Resolve project root robustly from this script location."""
+    here = Path(__file__).resolve()
+    candidates = [here.parents[3], here.parents[2], Path.cwd()]
+    for candidate in candidates:
+        if (candidate / "Doback-Data").exists():
+            return candidate
+    return here.parents[3]
+
+
+BASE = _resolve_project_base()
 FEATURE_COLUMNS = [
     "phi_lidar",
     "phi_lidar_deg",
@@ -274,6 +284,9 @@ def print_summary(summary: dict) -> None:
 
 def print_simple_summary(device_summaries: list[dict]) -> None:
     print("\n=== Resumen simplificado por DOBACK ===")
+    if not device_summaries:
+        print("No se encontraron pares raw GPS+Stability. Revisa --data-dir y la estructura Doback-Data/")
+        return
     for item in device_summaries:
         print(
             f"{item['device']}: raw={item['raw_pairs']}, "
