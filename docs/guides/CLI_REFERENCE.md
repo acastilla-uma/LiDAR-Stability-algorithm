@@ -147,6 +147,21 @@ Uso:
 python src/lidar_stability/visualization/process_raw_data.py --help
 ```
 
+### Inspect route terrain slice
+
+Archivo: `src/lidar_stability/visualization/inspect_route_terrain_slice.py`
+
+Uso:
+
+```bash
+python src/lidar_stability/visualization/inspect_route_terrain_slice.py --help
+```
+
+Funcion:
+- Muestra una porcion local del mapa LiDAR con la ruta del camion.
+- Calcula e imprime features de terreno por punto (`phi_lidar`, `tri`, `ruggedness`, etc.).
+- Permite usar opciones equivalentes al extractor de features: `--search-radius`, `--dem-size`, `--vehicle-track`, `--sampling`.
+
 ## ML
 
 ### Train baseline w model
