@@ -237,12 +237,32 @@ def split_train_holdout_by_group(
 
 
 def build_model(model_key: str, params: dict, random_state: int):
+    def normalize_max_features(value):
+        # sklearn accepts {'sqrt','log2'}, float in (0,1], int >=1, or None.
+        if value is None:
+            return None
+        if isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, (int, float)):
+            return value
+        text = str(value).strip().lower()
+        if text in {"none", "null"}:
+            return None
+        if text in {"sqrt", "log2"}:
+            return text
+        try:
+            if "." in text:
+                return float(text)
+            return int(text)
+        except ValueError:
+            return value
+
     if model_key == "rf":
         return RandomForestRegressor(
             n_estimators=int(params["rf_n_estimators"]),
             min_samples_leaf=int(params["rf_min_samples_leaf"]),
             max_depth=params["rf_max_depth"],
-            max_features=params["rf_max_features"],
+            max_features=normalize_max_features(params["rf_max_features"]),
             min_samples_split=int(params["rf_min_samples_split"]),
             bootstrap=True,
             oob_score=True,
@@ -254,7 +274,7 @@ def build_model(model_key: str, params: dict, random_state: int):
             n_estimators=int(params["extra_trees_n_estimators"]),
             min_samples_leaf=int(params["extra_trees_min_samples_leaf"]),
             max_depth=params["extra_trees_max_depth"],
-            max_features=params["extra_trees_max_features"],
+            max_features=normalize_max_features(params["extra_trees_max_features"]),
             min_samples_split=int(params["extra_trees_min_samples_split"]),
             random_state=random_state,
             n_jobs=-1,
@@ -273,13 +293,19 @@ def build_model(model_key: str, params: dict, random_state: int):
 
 
 def sample_params(model_key: str, rng: np.random.Generator) -> dict:
+    def draw_max_features() -> str | float:
+        # Avoid mixed-type np.choice output becoming np.str_('0.8').
+        if rng.random() < 0.5:
+            return str(rng.choice(["sqrt", "log2"]))
+        return float(rng.choice([0.5, 0.8]))
+
     if model_key == "rf":
         max_depth = None if rng.random() < 0.20 else int(rng.integers(8, 31))
         return {
             "rf_n_estimators": int(rng.integers(200, 1201)),
             "rf_min_samples_leaf": int(rng.integers(2, 13)),
             "rf_max_depth": max_depth,
-            "rf_max_features": rng.choice(["sqrt", "log2", 0.5, 0.8]),
+            "rf_max_features": draw_max_features(),
             "rf_min_samples_split": int(rng.integers(4, 25)),
         }
 
@@ -289,7 +315,7 @@ def sample_params(model_key: str, rng: np.random.Generator) -> dict:
             "extra_trees_n_estimators": int(rng.integers(250, 1401)),
             "extra_trees_min_samples_leaf": int(rng.integers(2, 12)),
             "extra_trees_max_depth": max_depth,
-            "extra_trees_max_features": rng.choice(["sqrt", "log2", 0.5, 0.8]),
+            "extra_trees_max_features": draw_max_features(),
             "extra_trees_min_samples_split": int(rng.integers(4, 25)),
         }
 
