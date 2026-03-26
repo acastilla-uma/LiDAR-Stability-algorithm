@@ -493,7 +493,7 @@ def run_search(args: argparse.Namespace) -> int:
     artifact = {
         "model": best_model_obj,
         "feature_columns": used_features,
-        "target_name": "omega_rad_s",
+        "target_name": args.target_column,
         "model_key": args.model,
         "search_best": asdict(best),
         "search_constraints": {
