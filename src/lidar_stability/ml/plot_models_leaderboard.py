@@ -50,6 +50,18 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="If true, only writes HTML + JSON table (fewer files).",
     )
+    parser.add_argument(
+        "--enrich-from-bundle",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="If true, reads model bundles (.joblib) to backfill missing params/n_features. Disable for faster execution.",
+    )
+    parser.add_argument(
+        "--dedupe-labels",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="If true, keep only one entry per model label (model@run_id), choosing the best metrics.",
+    )
     return parser.parse_args()
 
 
@@ -57,7 +69,7 @@ def find_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def load_metrics(metrics_dir: Path) -> pd.DataFrame:
+def load_metrics(metrics_dir: Path, enrich_from_bundle: bool = True) -> pd.DataFrame:
     bundle_cache: dict[Path, dict | None] = {}
 
     def _get_bundle(path: Path) -> dict | None:
@@ -140,7 +152,7 @@ def load_metrics(metrics_dir: Path) -> pd.DataFrame:
             else:
                 params_text = "{}"
 
-        return _enrich_from_bundle({
+        row = {
             "model": entry.get("model", path.stem),
             "run_id": entry.get("run_id", "default"),
             "rmse_mean": float(entry.get("rmse_mean")),
@@ -151,7 +163,12 @@ def load_metrics(metrics_dir: Path) -> pd.DataFrame:
             "metrics_path": str(path),
             "model_path": entry.get("model_path", ""),
             "params": params_text,
-        })
+        }
+
+        needs_enrichment = enrich_from_bundle and (
+            int(row.get("n_features", 0) or 0) == 0 or row.get("params") in (None, "", "{}")
+        )
+        return _enrich_from_bundle(row) if needs_enrichment else row
 
     def _history_to_row(entry: dict, payload: dict, path: Path) -> dict | None:
         if not {"cv_rmse_mean", "cv_mae_mean", "cv_r2_mean"}.issubset(entry.keys()):
@@ -179,7 +196,7 @@ def load_metrics(metrics_dir: Path) -> pd.DataFrame:
                     else:
                         n_samples = len(input_files)
 
-        return _enrich_from_bundle({
+        row = {
             "model": entry.get("model") or config.get("model", path.stem),
             "run_id": entry.get("trial", "default"),
             "rmse_mean": float(entry.get("cv_rmse_mean")),
@@ -190,7 +207,12 @@ def load_metrics(metrics_dir: Path) -> pd.DataFrame:
             "metrics_path": str(path),
             "model_path": payload.get("model_path", ""),
             "params": json.dumps(entry.get("params", {}), ensure_ascii=True) if isinstance(entry.get("params", {}), dict) else "{}",
-        })
+        }
+
+        needs_enrichment = enrich_from_bundle and (
+            int(row.get("n_features", 0) or 0) == 0 or row.get("params") in (None, "", "{}")
+        )
+        return _enrich_from_bundle(row) if needs_enrichment else row
 
     rows = []
     candidate_paths = (
@@ -263,6 +285,24 @@ def rank_models(df: pd.DataFrame) -> pd.DataFrame:
     return ranked
 
 
+def dedupe_by_label(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    deduped = df.copy()
+    deduped["label"] = deduped.apply(
+        lambda row: row["model"] if str(row["run_id"]) == "default" else f"{row['model']}@{row['run_id']}",
+        axis=1,
+    )
+    before = len(deduped)
+
+    # Keep the strongest variant per logical model label.
+    deduped = deduped.sort_values(
+        ["label", "r2_mean", "rmse_mean", "mae_mean", "n_samples", "n_features"],
+        ascending=[True, False, True, True, False, False],
+    )
+    deduped = deduped.drop_duplicates(subset=["label"], keep="first").copy()
+    removed = before - len(deduped)
+    return deduped.drop(columns=["label"]), removed
+
+
 def save_tables(ranked: pd.DataFrame, out_dir: Path) -> tuple[Path, Path]:
     csv_path = out_dir / "leaderboard_table.csv"
     json_path = out_dir / "leaderboard_table.json"
@@ -318,6 +358,43 @@ def plot_leaderboard(ranked: pd.DataFrame, out_dir: Path, title: str) -> list[Pa
 def save_html_report(ranked: pd.DataFrame, out_dir: Path, title: str, html_file: str) -> Path:
     html_path = out_dir / html_file
 
+    def _pretty_params_text(value: str) -> str:
+        text = str(value or "").strip()
+        if not text or text == "{}":
+            return "(sin parametros)"
+
+        # Some rows may contain JSON serialized as string literals.
+        for _ in range(2):
+            if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+                try:
+                    text = json.loads(text)
+                except Exception:
+                    break
+            if isinstance(text, str):
+                text = text.strip()
+
+        if isinstance(text, dict):
+            payload = text
+        else:
+            try:
+                payload = json.loads(text)
+            except Exception:
+                return str(value)
+
+        if not isinstance(payload, dict) or not payload:
+            return "(sin parametros)"
+
+        return "\n".join(f"{k}: {payload[k]}" for k in sorted(payload.keys()))
+
+    def _params_cell(value: str) -> str:
+        pretty = _pretty_params_text(value)
+        safe = (
+            pretty.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        return f"<pre class=\"params\">{safe}</pre>"
+
     table_df = ranked[
         [
             "overall_rank",
@@ -332,7 +409,92 @@ def save_html_report(ranked: pd.DataFrame, out_dir: Path, title: str, html_file:
             "params",
         ]
     ].copy()
-    table_html = table_df.to_html(index=False, float_format=lambda x: f"{x:.6f}")
+    table_df["params"] = table_df["params"].map(_params_cell)
+    table_html = table_df.to_html(index=False, float_format=lambda x: f"{x:.6f}", escape=False)
+
+    glossary_html = """
+<div class=\"card\">
+    <h2>Glosario de hiperparametros</h2>
+    <p>Esta guia resume el efecto de cada parametro y cuando conviene subirlo o bajarlo.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Parametro</th>
+                <th>Que controla</th>
+                <th>Subirlo suele implicar</th>
+                <th>Bajarlo suele implicar</th>
+                <th>Cuando tocarlo</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>n_estimators</td>
+                <td>Numero de arboles del ensamble</td>
+                <td>Mas estabilidad y menos varianza, mas tiempo/memoria</td>
+                <td>Entrenamiento mas rapido, algo mas de ruido</td>
+                <td>Sube si la metrica oscila entre folds; baja si el coste es alto y ya estas en meseta</td>
+            </tr>
+            <tr>
+                <td>max_depth</td>
+                <td>Profundidad maxima de cada arbol</td>
+                <td>Modelos mas expresivos, mayor riesgo de sobreajuste</td>
+                <td>Mas regularizacion, posible infraajuste</td>
+                <td>Baja si train muy alto y validacion cae; sube si no captura no linealidades</td>
+            </tr>
+            <tr>
+                <td>min_samples_leaf</td>
+                <td>Muestras minimas en hoja</td>
+                <td>Hojas mas grandes, menos ruido, fronteras mas suaves</td>
+                <td>Hojas pequenas, mas detalle, mas varianza</td>
+                <td>Sube con datos ruidosos; baja si pierdes detalle local</td>
+            </tr>
+            <tr>
+                <td>min_samples_split</td>
+                <td>Muestras minimas para dividir un nodo</td>
+                <td>Menos divisiones, arboles mas simples</td>
+                <td>Mas divisiones, arboles mas complejos</td>
+                <td>Sube para contener sobreajuste; baja si hay infraajuste</td>
+            </tr>
+            <tr>
+                <td>max_features</td>
+                <td>Numero/fraccion de variables evaluadas por split</td>
+                <td>Menos diversidad entre arboles, a veces mejor ajuste puntual</td>
+                <td>Mas diversidad del ensamble, mayor robustez</td>
+                <td>Baja si los arboles se parecen demasiado; sube si falta capacidad</td>
+            </tr>
+            <tr>
+                <td>learning_rate (GBR)</td>
+                <td>Peso de cada etapa de boosting</td>
+                <td>Convergencia rapida, mas riesgo de sobreajuste</td>
+                <td>Aprendizaje mas gradual y estable</td>
+                <td>Si lo bajas, normalmente compensa subiendo n_estimators</td>
+            </tr>
+            <tr>
+                <td>subsample (GBR)</td>
+                <td>Fraccion de muestras por iteracion</td>
+                <td>Con 1.0: menos ruido estocastico, mas riesgo de sobreajuste</td>
+                <td>Mas estocastico, mejor generalizacion en muchos casos</td>
+                <td>Prueba 0.6-0.9 para mejorar generalizacion cuando hay mucho dato</td>
+            </tr>
+            <tr>
+                <td>bootstrap / oob_score (RF)</td>
+                <td>Muestreo con reemplazo y validacion OOB</td>
+                <td>Con bootstrap=true hay mas diversidad de arboles</td>
+                <td>Sin bootstrap, arboles mas correlacionados</td>
+                <td>Activa oob_score para tener una referencia adicional sin CV extra</td>
+            </tr>
+            <tr>
+                <td>ccp_alpha</td>
+                <td>Intensidad de poda por coste-complejidad</td>
+                <td>Mas poda, menor complejidad</td>
+                <td>Menos poda, mayor capacidad</td>
+                <td>Sube ligeramente si detectas sobreajuste persistente</td>
+            </tr>
+        </tbody>
+    </table>
+    <p><strong>Regla practica:</strong> ajusta de uno en uno y valida con los mismos folds para comparar de forma justa.</p>
+</div>
+"""
 
     html = f"""<!doctype html>
 <html lang=\"en\">
@@ -349,12 +511,14 @@ def save_html_report(ranked: pd.DataFrame, out_dir: Path, title: str, html_file:
     th, td {{ border: 1px solid #ddd; padding: 8px; font-size: 13px; text-align: right; }}
     th:first-child, td:first-child, th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) {{ text-align: left; }}
     th {{ background: #f5f5f5; }}
+        .params {{ margin: 0; white-space: pre-wrap; text-align: left; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
   </style>
 </head>
 <body>
   <h1>{title}</h1>
     <p>Auto-generated comparison from *_metrics.json, *_leaderboard.json and *_history.json files in the selected folder.</p>
   <div class=\"card\"><h2>Ranking table</h2>{table_html}</div>
+    {glossary_html}
 </body>
 </html>
 """
@@ -374,12 +538,18 @@ def main() -> int:
     out_dir = (repo_root / args.output_dir).resolve() if args.output_dir else metrics_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = load_metrics(metrics_dir)
+    df = load_metrics(metrics_dir, enrich_from_bundle=args.enrich_from_bundle)
 
     if args.min_samples > 0:
         df = df[df["n_samples"] >= int(args.min_samples)].copy()
         if df.empty:
             raise RuntimeError("No models left after applying --min-samples filter")
+
+    removed_duplicates = 0
+    if args.dedupe_labels:
+        df, removed_duplicates = dedupe_by_label(df)
+        if df.empty:
+            raise RuntimeError("No models left after deduplication")
 
     ranked = rank_models(df)
     csv_path = None
@@ -392,6 +562,8 @@ def main() -> int:
 
     print("Leaderboard generated")
     print(f"  models: {len(ranked)}")
+    if args.dedupe_labels:
+        print(f"  duplicates removed: {removed_duplicates}")
     print("  ranking:")
     for _, row in ranked.iterrows():
         print(

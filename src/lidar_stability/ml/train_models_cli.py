@@ -54,6 +54,7 @@ MODEL_HPARAM_KEYS = {
         "extra_trees_min_samples_leaf",
         "extra_trees_max_depth",
         "extra_trees_max_features",
+        "extra_trees_min_samples_split",
     },
     "gbr": {
         "gbr_n_estimators",
@@ -212,6 +213,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="sqrt",
         help="ExtraTrees: max features at each split (sqrt, log2, or int)",
+    )
+    parser.add_argument(
+        "--extra-trees-min-samples-split",
+        type=int,
+        default=2,
+        help="ExtraTrees: minimum samples required to split an internal node",
     )
 
     # GradientBoosting hyperparameters
@@ -433,6 +440,7 @@ def build_model(model_key: str, random_state: int, hyperparams: dict = None):
             random_state=random_state,
             n_jobs=-1,
             min_samples_leaf=hyperparams.get("extra_trees_min_samples_leaf", 2),
+            min_samples_split=hyperparams.get("extra_trees_min_samples_split", 2),
             max_depth=hyperparams.get("extra_trees_max_depth", None),
             max_features=hyperparams.get("extra_trees_max_features", "sqrt"),
         )
