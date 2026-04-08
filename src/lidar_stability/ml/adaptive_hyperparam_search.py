@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 from typing import Iterable
@@ -435,6 +436,20 @@ def run_search(args: argparse.Namespace) -> int:
     print(f"Samples after cleaning: {len(X)} | train={len(X_train)} holdout={len(X_hold)}")
     print(f"Used features ({len(used_features)}): {used_features}")
 
+    selected_files_rel = [str(p.relative_to(repo_root)) for p in csv_paths]
+    training_context = {
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "repo_root": str(repo_root),
+        "command": " ".join(sys.argv),
+        "selected_files": selected_files_rel,
+        "selected_files_count": len(selected_files_rel),
+        "rows_after_cleaning": int(len(X)),
+        "train_rows": int(len(X_train)),
+        "holdout_rows": int(len(X_hold)),
+        "resolved_target_name": "omega_rad_s",
+        "resolved_feature_columns": list(used_features),
+    }
+
     rng = np.random.default_rng(args.random_state)
 
     history: list[TrialResult] = []
@@ -493,8 +508,14 @@ def run_search(args: argparse.Namespace) -> int:
     artifact = {
         "model": best_model_obj,
         "feature_columns": used_features,
-        "target_name": args.target_column,
+        "target_name": "omega_rad_s",
+        "target_column_input": args.target_column,
         "model_key": args.model,
+        "run_id": f"adaptive_target_{str(args.target_r2).replace('.', '_')}",
+        "params": dict(best.params),
+        "n_samples": int(len(X)),
+        "n_features": int(len(used_features)),
+        "training_context": training_context,
         "search_best": asdict(best),
         "search_constraints": {
             "target_r2": args.target_r2,
@@ -506,23 +527,56 @@ def run_search(args: argparse.Namespace) -> int:
     model_path = out_dir / f"{args.prefix}_{args.model}_best.joblib"
     history_path = out_dir / f"{args.prefix}_{args.model}_history.json"
     leaderboard_path = out_dir / f"{args.prefix}_{args.model}_leaderboard.csv"
+    leaderboard_json_path = out_dir / f"{args.prefix}_{args.model}_leaderboard.json"
 
     dump(artifact, model_path, compress=3)
 
     history_payload = {
+        "format": "adaptive_history_v2",
         "config": vars(args),
+        "training_context": training_context,
+        "dataset": {
+            "n_samples": int(len(X)),
+            "n_features": int(len(used_features)),
+            "feature_columns": list(used_features),
+            "target_name": "omega_rad_s",
+            "target_column_input": args.target_column,
+        },
         "n_trials": len(history),
         "best": asdict(best),
         "history": [asdict(h) for h in history],
         "model_path": str(model_path),
     }
-    history_path.write_text(json.dumps(history_payload), encoding="utf-8")
+    history_path.write_text(json.dumps(history_payload, indent=2), encoding="utf-8")
 
     rank_df = pd.DataFrame([asdict(h) for h in history]).sort_values(
         by=["holdout_r2", "cv_r2_mean"],
         ascending=False,
     )
     rank_df.to_csv(leaderboard_path, index=False)
+
+    leaderboard_rows = []
+    for h in history:
+        row = asdict(h)
+        row.update(
+            {
+                "run_id": int(h.trial),
+                "label": f"{args.model}@{h.trial}",
+                "rmse_mean": float(h.cv_rmse_mean),
+                "mae_mean": float(h.cv_mae_mean),
+                "r2_mean": float(h.cv_r2_mean),
+                "n_samples": int(len(X)),
+                "n_features": int(len(used_features)),
+                "params": dict(h.params),
+                "feature_columns": list(used_features),
+                "target_name": "omega_rad_s",
+                "model_path": str(model_path),
+                "metrics_path": str(history_path),
+                "training_context": training_context,
+            }
+        )
+        leaderboard_rows.append(row)
+    leaderboard_json_path.write_text(json.dumps(leaderboard_rows, indent=2), encoding="utf-8")
 
     print("\nBest trial summary")
     print(
@@ -532,6 +586,7 @@ def run_search(args: argparse.Namespace) -> int:
     print(f"  model: {model_path}")
     print(f"  history: {history_path}")
     print(f"  leaderboard: {leaderboard_path}")
+    print(f"  leaderboard_json: {leaderboard_json_path}")
 
     if args.model == "rf":
         run_config = {

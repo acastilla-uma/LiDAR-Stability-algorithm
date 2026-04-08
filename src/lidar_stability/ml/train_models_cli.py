@@ -7,6 +7,7 @@ import argparse
 import ast
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sys
@@ -528,6 +529,18 @@ def main() -> int:
         target_column=args.target_column,
     )
 
+    selected_files_rel = [str(p.relative_to(repo_root)) for p in csv_paths]
+    training_context = {
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "repo_root": str(repo_root),
+        "command": " ".join(sys.argv),
+        "selected_files": selected_files_rel,
+        "selected_files_count": len(selected_files_rel),
+        "rows_after_filters": int(len(df)),
+        "resolved_target_name": "omega_rad_s",
+        "resolved_feature_columns": list(used_features),
+    }
+
     n_splits = max(2, int(args.n_splits))
     out_dir = (repo_root / args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -575,12 +588,28 @@ def main() -> int:
             model_path = out_dir / f"{args.prefix}_{model_key}_{run_id}.joblib"
             metrics_path = out_dir / f"{args.prefix}_{model_key}_{run_id}_metrics.json"
 
+        effective_hyperparams = _effective_model_hyperparams(model_key, hyperparams)
+        metrics_summary = {
+            "rmse_mean": result.rmse_mean,
+            "rmse_std": result.rmse_std,
+            "mae_mean": result.mae_mean,
+            "mae_std": result.mae_std,
+            "r2_mean": result.r2_mean,
+            "r2_std": result.r2_std,
+        }
+
         artifact = {
             "model": model,
             "feature_columns": used_features,
             "target_name": "omega_rad_s",
             "model_key": model_key,
             "run_id": run_id,
+            "params": effective_hyperparams,
+            "n_samples": result.n_samples,
+            "n_features": result.n_features,
+            "metrics": metrics_summary,
+            "folds": result.folds,
+            "training_context": training_context,
         }
         if compact_output:
             bundled_artifacts[artifact_key] = artifact
@@ -597,6 +626,7 @@ def main() -> int:
             "shuffle_files": args.shuffle_files,
             "query": args.query,
             "target_column": args.target_column or "auto",
+            "target_name": "omega_rad_s",
             "feature_columns": used_features,
             "kfold": n_splits,
             "n_samples": result.n_samples,
@@ -608,12 +638,14 @@ def main() -> int:
             "r2_mean": result.r2_mean,
             "r2_std": result.r2_std,
             "folds": result.folds,
+            "params": effective_hyperparams,
             "model_path": str(model_path),
             "artifact_key": artifact_key,
+            "training_context": training_context,
             "run_config": {
                 "model": model_key,
                 "run_id": run_id,
-                "hyperparameters": _effective_model_hyperparams(model_key, hyperparams),
+                "hyperparameters": effective_hyperparams,
             },
         }
         if compact_output:
@@ -629,8 +661,14 @@ def main() -> int:
                 "rmse_mean": result.rmse_mean,
                 "mae_mean": result.mae_mean,
                 "r2_mean": result.r2_mean,
+                "n_samples": result.n_samples,
+                "n_features": result.n_features,
+                "params": effective_hyperparams,
+                "feature_columns": list(used_features),
+                "target_name": "omega_rad_s",
                 "model_path": str(model_path),
                 "metrics_path": str(metrics_path),
+                "training_context": training_context,
             }
         )
 
@@ -644,17 +682,19 @@ def main() -> int:
 
     if compact_output:
         bundle_payload = {
-            "format": "bundle_v1",
+            "format": "bundle_v2",
             "prefix": args.prefix,
             "n_models": len(bundled_artifacts),
+            "training_context": training_context,
             "artifacts": bundled_artifacts,
         }
         dump(bundle_payload, bundle_path, compress=compression)
 
         compact_metrics_payload = {
-            "format": "compact_metrics_v1",
+            "format": "compact_metrics_v2",
             "prefix": args.prefix,
             "n_runs": len(consolidated_metrics),
+            "training_context": training_context,
             "runs": consolidated_metrics,
         }
         bundle_metrics_path.write_text(json.dumps(compact_metrics_payload), encoding="utf-8")
@@ -664,7 +704,7 @@ def main() -> int:
         print(f"  consolidated metrics: {bundle_metrics_path}")
 
     leaderboard_path = out_dir / f"{args.prefix}_leaderboard.json"
-    leaderboard_path.write_text(json.dumps(leaderboard), encoding="utf-8")
+    leaderboard_path.write_text(json.dumps(leaderboard, indent=2), encoding="utf-8")
     print(f"\nLeaderboard saved: {leaderboard_path}")
 
     return 0

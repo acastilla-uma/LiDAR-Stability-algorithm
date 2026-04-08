@@ -1,5 +1,5 @@
 ﻿#!/usr/bin/env python3
-"""Build a graphical leaderboard from saved model metrics JSON files."""
+"""Build a graphical leaderboard from saved model metrics and leaderboard JSON files."""
 
 from __future__ import annotations
 
@@ -7,10 +7,9 @@ import argparse
 import json
 from pathlib import Path
 
+import joblib
 import matplotlib.pyplot as plt
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import seaborn as sns
 
 
@@ -26,8 +25,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        default=None,
-        help="Optional output folder for leaderboard CSV/JSON and plots. Defaults to metrics-dir.",
+        default="output/leaderboard",
+        help="Optional output folder for leaderboard CSV/JSON and plots. Defaults to output/leaderboard.",
     )
     parser.add_argument(
         "--title",
@@ -59,23 +58,148 @@ def find_repo_root() -> Path:
 
 
 def load_metrics(metrics_dir: Path) -> pd.DataFrame:
+    bundle_cache: dict[Path, dict | None] = {}
+
+    def _get_bundle(path: Path) -> dict | None:
+        if path in bundle_cache:
+            return bundle_cache[path]
+        try:
+            loaded = joblib.load(path)
+            bundle_cache[path] = loaded if isinstance(loaded, dict) else None
+        except Exception:
+            bundle_cache[path] = None
+        return bundle_cache[path]
+
+    def _parse_bundle_ref(model_path: str) -> tuple[Path | None, str | None]:
+        if not model_path:
+            return None, None
+        if "::" in model_path:
+            path_str, model_key = model_path.split("::", 1)
+            return Path(path_str), model_key
+        return Path(model_path), None
+
+    def _enrich_from_bundle(row: dict) -> dict:
+        bundle_path, model_key = _parse_bundle_ref(str(row.get("model_path") or ""))
+        if bundle_path is None:
+            return row
+
+        bundle = _get_bundle(bundle_path)
+        if not isinstance(bundle, dict):
+            return row
+
+        artifacts = bundle.get("artifacts")
+        if not isinstance(artifacts, dict) or not artifacts:
+            return row
+
+        artifact = None
+        if model_key and model_key in artifacts:
+            artifact = artifacts.get(model_key)
+        else:
+            label = f"{row.get('model')}@{row.get('run_id')}"
+            artifact = artifacts.get(label)
+            if artifact is None and len(artifacts) == 1:
+                artifact = next(iter(artifacts.values()))
+
+        if not isinstance(artifact, dict):
+            return row
+
+        if int(row.get("n_features", 0) or 0) == 0:
+            feature_columns = artifact.get("feature_columns")
+            if isinstance(feature_columns, list):
+                row["n_features"] = len(feature_columns)
+
+        params_raw = row.get("params", "{}")
+        if params_raw in (None, "", "{}"):
+            model_obj = artifact.get("model")
+            if model_obj is not None and hasattr(model_obj, "get_params"):
+                try:
+                    row["params"] = json.dumps(model_obj.get_params(deep=False), ensure_ascii=True)
+                except Exception:
+                    pass
+
+        return row
+
     def _to_row(entry: dict, path: Path) -> dict | None:
         if not {"model", "rmse_mean", "mae_mean", "r2_mean"}.issubset(entry.keys()):
             return None
-        return {
+
+        n_samples = int(entry.get("n_samples", 0) or 0)
+        n_features = int(entry.get("n_features", 0) or 0)
+        if n_features == 0 and isinstance(entry.get("feature_columns"), list):
+            n_features = len(entry.get("feature_columns", []))
+
+        raw_params = entry.get("params")
+        if isinstance(raw_params, dict):
+            params_text = json.dumps(raw_params, ensure_ascii=True)
+        elif isinstance(raw_params, str) and raw_params.strip():
+            params_text = raw_params
+        else:
+            run_cfg = entry.get("run_config")
+            if isinstance(run_cfg, dict) and isinstance(run_cfg.get("hyperparameters"), dict):
+                params_text = json.dumps(run_cfg["hyperparameters"], ensure_ascii=True)
+            else:
+                params_text = "{}"
+
+        return _enrich_from_bundle({
             "model": entry.get("model", path.stem),
             "run_id": entry.get("run_id", "default"),
             "rmse_mean": float(entry.get("rmse_mean")),
             "mae_mean": float(entry.get("mae_mean")),
             "r2_mean": float(entry.get("r2_mean")),
-            "n_samples": int(entry.get("n_samples", 0)),
-            "n_features": int(entry.get("n_features", 0)),
+            "n_samples": n_samples,
+            "n_features": n_features,
             "metrics_path": str(path),
             "model_path": entry.get("model_path", ""),
-        }
+            "params": params_text,
+        })
+
+    def _history_to_row(entry: dict, payload: dict, path: Path) -> dict | None:
+        if not {"cv_rmse_mean", "cv_mae_mean", "cv_r2_mean"}.issubset(entry.keys()):
+            return None
+
+        config = payload.get("config", {}) if isinstance(payload.get("config"), dict) else {}
+        dataset = payload.get("dataset", {}) if isinstance(payload.get("dataset"), dict) else {}
+
+        feature_columns = dataset.get("feature_columns", config.get("feature_columns", []))
+        n_features = int(dataset.get("n_features", 0) or 0)
+        if n_features == 0 and isinstance(feature_columns, list):
+            n_features = len(feature_columns)
+
+        n_samples = int(dataset.get("n_samples", 0) or config.get("n_samples", 0) or 0)
+        if n_samples == 0:
+            max_rows = int(config.get("max_rows", 0) or 0)
+            if max_rows > 0:
+                n_samples = max_rows
+            else:
+                input_files = config.get("input_glob")
+                max_rows_per_source = int(config.get("max_rows_per_source", 0) or 0)
+                if isinstance(input_files, list) and input_files:
+                    if max_rows_per_source > 0:
+                        n_samples = len(input_files) * max_rows_per_source
+                    else:
+                        n_samples = len(input_files)
+
+        return _enrich_from_bundle({
+            "model": entry.get("model") or config.get("model", path.stem),
+            "run_id": entry.get("trial", "default"),
+            "rmse_mean": float(entry.get("cv_rmse_mean")),
+            "mae_mean": float(entry.get("cv_mae_mean")),
+            "r2_mean": float(entry.get("cv_r2_mean")),
+            "n_samples": n_samples,
+            "n_features": n_features,
+            "metrics_path": str(path),
+            "model_path": payload.get("model_path", ""),
+            "params": json.dumps(entry.get("params", {}), ensure_ascii=True) if isinstance(entry.get("params", {}), dict) else "{}",
+        })
 
     rows = []
-    for path in sorted(metrics_dir.glob("*_metrics.json")):
+    candidate_paths = (
+        list(metrics_dir.glob("*_metrics.json"))
+        + list(metrics_dir.glob("*_leaderboard.json"))
+        + list(metrics_dir.glob("*_history.json"))
+    )
+
+    for path in sorted({path.resolve(): path for path in candidate_paths}.values(), key=lambda item: item.name):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
@@ -90,13 +214,33 @@ def load_metrics(metrics_dir: Path) -> pd.DataFrame:
                     rows.append(row)
             continue
 
+        if isinstance(payload, dict) and isinstance(payload.get("history"), list):
+            for entry in payload["history"]:
+                if not isinstance(entry, dict):
+                    continue
+                row = _history_to_row(entry, payload, path)
+                if row is not None:
+                    rows.append(row)
+            continue
+
+        if isinstance(payload, list):
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                row = _to_row(entry, path)
+                if row is not None:
+                    rows.append(row)
+            continue
+
         if isinstance(payload, dict):
             row = _to_row(payload, path)
             if row is not None:
                 rows.append(row)
 
     if not rows:
-        raise FileNotFoundError(f"No valid *_metrics.json files found in: {metrics_dir}")
+        raise FileNotFoundError(
+            f"No valid *_metrics.json, *_leaderboard.json, or *_history.json files found in: {metrics_dir}"
+        )
 
     return pd.DataFrame(rows)
 
@@ -174,34 +318,6 @@ def plot_leaderboard(ranked: pd.DataFrame, out_dir: Path, title: str) -> list[Pa
 def save_html_report(ranked: pd.DataFrame, out_dir: Path, title: str, html_file: str) -> Path:
     html_path = out_dir / html_file
 
-    rank_fig = px.bar(
-        ranked,
-        x="label",
-        y="rank_score",
-        color="model",
-        title=f"{title} - Overall rank score (lower is better)",
-        labels={"label": "Model run", "rank_score": "Rank score"},
-    )
-    rank_fig.update_layout(xaxis_tickangle=-25)
-
-    metrics_fig = go.Figure()
-    metrics_fig.add_trace(
-        go.Bar(name="RMSE", x=ranked["label"], y=ranked["rmse_mean"], marker_color="#1f77b4")
-    )
-    metrics_fig.add_trace(
-        go.Bar(name="MAE", x=ranked["label"], y=ranked["mae_mean"], marker_color="#2ca02c")
-    )
-    metrics_fig.add_trace(
-        go.Bar(name="R2", x=ranked["label"], y=ranked["r2_mean"], marker_color="#d62728")
-    )
-    metrics_fig.update_layout(
-        barmode="group",
-        title=f"{title} - Metrics comparison",
-        xaxis_title="Model run",
-        yaxis_title="Metric value",
-        xaxis_tickangle=-25,
-    )
-
     table_df = ranked[
         [
             "overall_rank",
@@ -213,12 +329,10 @@ def save_html_report(ranked: pd.DataFrame, out_dir: Path, title: str, html_file:
             "r2_mean",
             "n_samples",
             "n_features",
+            "params",
         ]
     ].copy()
     table_html = table_df.to_html(index=False, float_format=lambda x: f"{x:.6f}")
-
-    rank_html = rank_fig.to_html(full_html=False, include_plotlyjs="cdn")
-    metrics_html = metrics_fig.to_html(full_html=False, include_plotlyjs=False)
 
     html = f"""<!doctype html>
 <html lang=\"en\">
@@ -239,9 +353,7 @@ def save_html_report(ranked: pd.DataFrame, out_dir: Path, title: str, html_file:
 </head>
 <body>
   <h1>{title}</h1>
-  <p>Auto-generated comparison from *_metrics.json files in the selected folder.</p>
-  <div class=\"card\">{rank_html}</div>
-  <div class=\"card\">{metrics_html}</div>
+    <p>Auto-generated comparison from *_metrics.json, *_leaderboard.json and *_history.json files in the selected folder.</p>
   <div class=\"card\"><h2>Ranking table</h2>{table_html}</div>
 </body>
 </html>
@@ -271,10 +383,8 @@ def main() -> int:
 
     ranked = rank_models(df)
     csv_path = None
-    plot_paths: list[Path] = []
     if not args.compact_output:
         csv_path, _ = save_tables(ranked, out_dir)
-        plot_paths = plot_leaderboard(ranked, out_dir, args.title)
 
     json_path = out_dir / "leaderboard_table.json"
     json_path.write_text(ranked.to_json(orient="records"), encoding="utf-8")
@@ -293,8 +403,6 @@ def main() -> int:
         print(f"  table CSV: {csv_path}")
     print(f"  table JSON: {json_path}")
     print(f"  report HTML: {html_path}")
-    for p in plot_paths:
-        print(f"  plot: {p}")
 
     return 0
 
