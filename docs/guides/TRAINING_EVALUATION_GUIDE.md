@@ -132,7 +132,7 @@ Nota: esos archivos por corrida se generan solo con `--no-compact-output`.
 - `--models`: lista de modelos a entrenar (`rf extra_trees gbr`).
 - `--run-config`: corrida repetible con JSON/diccionario por corrida (si se usa, reemplaza `--models`).
 - `--n-splits`: folds para validacion cruzada.
-- `--target-column`: target explicito (si no, autodeteccion).
+- `--target-column`: target explicito (default y recomendado: `gy`).
 - `--feature-columns`: lista de columnas de entrada (opcional).
 - `--output-dir`: carpeta de salida de artefactos.
 - `--prefix`: prefijo para nombres de archivo generados.

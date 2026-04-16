@@ -19,7 +19,7 @@ DEFAULT_FEATURE_COLUMNS = [
     'ruggedness',
 ]
 
-TARGET_CANDIDATES = ['omega_rad_s', 'w_rad_s', 'gy_rad_s', 'gy', 'gz', 'gy_mdeg_s']
+DEFAULT_TARGET_COLUMN = 'gy'
 
 
 def _resolve_column(df: pd.DataFrame, candidates: list[str], required: bool = True) -> str | None:
@@ -48,18 +48,19 @@ def _resolve_feature_columns(df: pd.DataFrame, feature_columns: list[str] | None
     return usable
 
 
-def _resolve_target_omega_rad_s(df: pd.DataFrame, target_column: str | None = None) -> pd.Series:
-    if target_column:
-        series = _to_numeric_series(df, target_column)
-        if target_column in {'gy', 'gz', 'gy_mdeg_s'}:
-            return np.radians(series / 1000.0)
-        return series
+def _resolve_target_gy(df: pd.DataFrame, target_column: str | None = None) -> pd.Series:
+    resolved_target = target_column or DEFAULT_TARGET_COLUMN
+    if resolved_target != DEFAULT_TARGET_COLUMN:
+        raise ValueError(
+            f"Target column must be '{DEFAULT_TARGET_COLUMN}'. Received: '{resolved_target}'"
+        )
 
-    target = _resolve_column(df, TARGET_CANDIDATES)
-    series = _to_numeric_series(df, target)
-    if target in {'gy', 'gz', 'gy_mdeg_s'}:
-        return np.radians(series / 1000.0)
-    return series
+    if DEFAULT_TARGET_COLUMN not in df.columns:
+        raise KeyError(
+            f"Missing required target column '{DEFAULT_TARGET_COLUMN}' in input dataframe"
+        )
+
+    return _to_numeric_series(df, DEFAULT_TARGET_COLUMN)
 
 
 def build_w_training_dataset(
@@ -67,14 +68,14 @@ def build_w_training_dataset(
     feature_columns: list[str] | None = None,
     target_column: str | None = None,
 ) -> tuple[pd.DataFrame, pd.Series, list[str], pd.DataFrame]:
-    """Build supervised dataset for w prediction in rad/s."""
+    """Build supervised dataset using gy as target."""
     if df.empty:
         raise ValueError("Input dataframe is empty")
 
     used_features = _resolve_feature_columns(df, feature_columns=feature_columns)
 
     X = df[used_features].apply(pd.to_numeric, errors='coerce')
-    y = _resolve_target_omega_rad_s(df, target_column=target_column)
+    y = _resolve_target_gy(df, target_column=target_column)
 
     clean_mask = X.notna().all(axis=1) & y.notna() & np.isfinite(y)
     X_clean = X.loc[clean_mask].copy()

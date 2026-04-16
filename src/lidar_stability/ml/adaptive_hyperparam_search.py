@@ -126,8 +126,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--target-column",
-        default=None,
-        help="Optional explicit target column. Auto-detection if omitted",
+        default="gy",
+        help="Explicit target column (must be 'gy').",
     )
     parser.add_argument(
         "--feature-columns",
@@ -446,7 +446,7 @@ def run_search(args: argparse.Namespace) -> int:
         "rows_after_cleaning": int(len(X)),
         "train_rows": int(len(X_train)),
         "holdout_rows": int(len(X_hold)),
-        "resolved_target_name": "omega_rad_s",
+        "resolved_target_name": "gy",
         "resolved_feature_columns": list(used_features),
     }
 
@@ -508,7 +508,7 @@ def run_search(args: argparse.Namespace) -> int:
     artifact = {
         "model": best_model_obj,
         "feature_columns": used_features,
-        "target_name": "omega_rad_s",
+        "target_name": "gy",
         "target_column_input": args.target_column,
         "model_key": args.model,
         "run_id": f"adaptive_target_{str(args.target_r2).replace('.', '_')}",
@@ -539,7 +539,7 @@ def run_search(args: argparse.Namespace) -> int:
             "n_samples": int(len(X)),
             "n_features": int(len(used_features)),
             "feature_columns": list(used_features),
-            "target_name": "omega_rad_s",
+            "target_name": "gy",
             "target_column_input": args.target_column,
         },
         "n_trials": len(history),
@@ -569,7 +569,7 @@ def run_search(args: argparse.Namespace) -> int:
                 "n_features": int(len(used_features)),
                 "params": dict(h.params),
                 "feature_columns": list(used_features),
-                "target_name": "omega_rad_s",
+                "target_name": "gy",
                 "model_path": str(model_path),
                 "metrics_path": str(history_path),
                 "training_context": training_context,

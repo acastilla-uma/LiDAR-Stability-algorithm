@@ -15,9 +15,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import argparse
 from pathlib import Path
+import re
 
 try:
     from pyproj import Transformer
@@ -149,6 +150,65 @@ def parse_raw_stability_file(filepath):
     
     data = []
     device_id = None
+    session_base_dt = None
+    current_marker = None
+    pending_indices = []
+
+    def _header_to_datetime(header_line: str):
+        parts = [p.strip() for p in header_line.split(';') if p.strip()]
+        if len(parts) < 2:
+            return None
+        try:
+            return datetime.strptime(parts[1], "%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            return None
+
+    def _normalize_marker_dt(marker_clock_dt: datetime):
+        if current_marker is None:
+            return marker_clock_dt
+
+        normalized = datetime.combine(current_marker.date(), marker_clock_dt.time())
+        if normalized < current_marker and (current_marker - normalized) > timedelta(hours=12):
+            normalized += timedelta(days=1)
+        if normalized <= current_marker:
+            normalized = current_marker + timedelta(seconds=1)
+        return normalized
+
+    def _finalize_pending(next_marker=None):
+        nonlocal pending_indices, current_marker
+
+        if not pending_indices:
+            if next_marker is not None:
+                current_marker = next_marker
+            return
+
+        anchor = current_marker or session_base_dt
+        if anchor is None and next_marker is not None:
+            anchor = next_marker
+        if anchor is None:
+            pending_indices = []
+            return
+
+        if next_marker is not None:
+            # Stability clock markers are emitted every second; distribute 1s across N rows.
+            step_seconds = 1.0 / len(pending_indices)
+        else:
+            step_seconds = 1.0 / len(pending_indices)
+
+        if not np.isfinite(step_seconds) or step_seconds <= 0:
+            step_seconds = 0.1
+
+        for i, idx in enumerate(pending_indices, start=1):
+            ts_dt = anchor + timedelta(seconds=step_seconds * i)
+            data[idx]['timestamp'] = int(ts_dt.timestamp() * 1e6)
+            data[idx]['utc_datetime'] = ts_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+        if next_marker is not None:
+            current_marker = next_marker
+        else:
+            current_marker = datetime.fromtimestamp(data[pending_indices[-1]]['timestamp'] / 1e6)
+
+        pending_indices = []
     
     with open(filepath, 'r', encoding='utf-8') as f:
         lines = f.readlines()
@@ -158,11 +218,48 @@ def parse_raw_stability_file(filepath):
             header_parts = lines[0].strip().split(';')
             if len(header_parts) >= 3:
                 device_id = header_parts[2].strip()
+            session_base_dt = _header_to_datetime(lines[0].strip())
+            current_marker = session_base_dt
         
         # Segunda línea: headers (saltar)
         # Tercera línea en adelante: datos
         for line_num, line in enumerate(lines[2:], start=3):
-            parts = [p.strip() for p in line.strip().split(';')]
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            if stripped.upper().startswith('ESTABILIDAD'):
+                next_header_dt = _header_to_datetime(stripped)
+                if next_header_dt is not None:
+                    _finalize_pending(next_header_dt)
+                    session_base_dt = next_header_dt
+                    current_marker = next_header_dt
+                continue
+
+            if stripped.lower().startswith('ax;'):
+                continue
+
+            if re.match(r"^\d{1,2}:\d{2}:\d{2}$", stripped):
+                try:
+                    marker_clock = datetime.strptime(stripped, "%H:%M:%S")
+                except ValueError:
+                    continue
+
+                if current_marker is not None:
+                    marker_dt = datetime.combine(current_marker.date(), marker_clock.time())
+                elif session_base_dt is not None:
+                    marker_dt = datetime.combine(session_base_dt.date(), marker_clock.time())
+                else:
+                    marker_dt = None
+
+                if marker_dt is not None:
+                    marker_dt = _normalize_marker_dt(marker_dt)
+                    _finalize_pending(marker_dt)
+                continue
+
+            parts = [p.strip() for p in stripped.split(';')]
+            while parts and parts[-1] == '':
+                parts.pop()
             
             if len(parts) < 10:
                 continue
@@ -207,15 +304,12 @@ def parse_raw_stability_file(filepath):
                 else:
                     risk = 'LOW'       # Seguro
                 
-                # Timestamp
-                timestamp_us = int(time_ant) if time_ant > 1e9 else line_num * 100000
-                
                 # Speed (simplificado)
                 speed = min(abs(ax) / 100.0, 40.0)
                 
                 record = {
-                    'timestamp': timestamp_us,
-                    'utc_datetime': f"2025-08-25 12:00:{line_num % 60:02d}",
+                    'timestamp': None,
+                    'utc_datetime': None,
                     'roll': roll,
                     'pitch': pitch,
                     'yaw': yaw,
@@ -232,11 +326,17 @@ def parse_raw_stability_file(filepath):
                     'rollover_risk': risk
                 }
                 data.append(record)
+                pending_indices.append(len(data) - 1)
                 
             except (ValueError, IndexError):
                 continue
+
+    _finalize_pending(next_marker=None)
     
     df = pd.DataFrame(data)
+    if not df.empty:
+        df = df.dropna(subset=['timestamp']).copy()
+        df['timestamp'] = df['timestamp'].astype(np.int64)
     print(f"  ✓ {len(df)} registros de estabilidad parseados")
     return df
 

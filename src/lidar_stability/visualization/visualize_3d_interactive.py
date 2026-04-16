@@ -32,7 +32,7 @@ def find_segment_files(base_name: str, mapmatch_dir: Path) -> list[Path]:
 
 
 def visualize_3d_interactive(base_name: str, mapmatch_dir: str = None, laz_dir: str = None,
-                             points_sample: int = 50_000, stability_col: str = "si",
+                             points_sample: int = 1_000_000, stability_col: str = "si",
                              output_path: str = None, filter_ground: bool = True,
                              padding_m: float = 100.0, show_terrain_features: bool = True):
     project_root = Path(__file__).resolve().parents[3]
@@ -198,7 +198,7 @@ def main():
     parser.add_argument("--base", required=True)
     parser.add_argument("--mapmatch-dir", default=None)
     parser.add_argument("--laz-dir", default=None)
-    parser.add_argument("--points-sample", type=int, default=50_000)
+    parser.add_argument("--points-sample", type=int, default=1_000_000)
     parser.add_argument("--stability-col", default="si")
     parser.add_argument("--no-ground-filter", action="store_true")
     parser.add_argument("--padding", type=float, default=100.0)

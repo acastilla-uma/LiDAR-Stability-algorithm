@@ -92,9 +92,9 @@ class TestWFeatureEngineering:
         assert np.isfinite(X.values).all()
         assert np.isfinite(y.values).all()
 
-    def test_target_converted_to_rad_s(self, featured_like_df):
+    def test_target_is_gy(self, featured_like_df):
         _, y, _, _ = build_w_training_dataset(featured_like_df, target_column='gy')
 
-        expected_first = np.radians(featured_like_df.iloc[0]['gy'] / 1000.0)
+        expected_first = featured_like_df.iloc[0]['gy']
         assert np.isclose(y.iloc[0], expected_first)
 

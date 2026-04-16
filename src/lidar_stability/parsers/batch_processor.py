@@ -2,7 +2,7 @@
 Process and unify DOBACK GPS and stability data.
 
 - Cleans GPS data and stability data.
-- Matches GPS and stability by timestamp (GPS timestamp vs stability timeantwifi).
+- Matches GPS and stability by timestamp.
 - Outputs one folder per matched GPS/ESTABILIDAD pair.
 
 Default input:
@@ -210,7 +210,7 @@ def _parse_stability_header(header_line):
 
 
 def parse_stability_file(stab_path):
-    """Parse stability file and build timestamp using timeantwifi."""
+    """Parse stability file and build timestamp via dynamic interpolation between clock markers."""
     with open(stab_path, "r", encoding="latin-1") as f:
         header_line = f.readline().strip()
         columns_line = f.readline().strip()
@@ -222,53 +222,116 @@ def parse_stability_file(stab_path):
             return None
 
         columns = raw_columns
-        timeantwifi_index = None
-        for i, name in enumerate(columns):
-            if name.lower() == "timeantwifi":
-                timeantwifi_index = i
-                break
-
         rows = []
-        base_times = []
-        timeantwifi_values = []
-        current_time = None
+        timestamps = []
+        pending_row_indices = []
+        current_marker = base_datetime
+
+        def _normalize_marker(marker_time: datetime) -> datetime:
+            if current_marker is None:
+                return marker_time
+
+            normalized = datetime.combine(current_marker.date(), marker_time.time())
+            if normalized < current_marker and (current_marker - normalized) > timedelta(hours=12):
+                normalized += timedelta(days=1)
+            if normalized <= current_marker:
+                normalized = current_marker + timedelta(seconds=1)
+            return normalized
+
+        def _finalize_pending(next_marker: datetime | None) -> None:
+            nonlocal pending_row_indices, current_marker
+
+            if not pending_row_indices:
+                if next_marker is not None:
+                    current_marker = next_marker
+                return
+
+            anchor = current_marker or base_datetime
+            if anchor is None and next_marker is not None:
+                anchor = next_marker
+            if anchor is None:
+                pending_row_indices = []
+                return
+
+            if next_marker is not None:
+                # Stability clock markers are emitted every second; distribute 1s across N rows.
+                step_seconds = 1.0 / len(pending_row_indices)
+            else:
+                step_seconds = 1.0 / len(pending_row_indices)
+
+            if not np.isfinite(step_seconds) or step_seconds <= 0:
+                step_seconds = 0.1
+
+            for i, row_idx in enumerate(pending_row_indices, start=1):
+                timestamps[row_idx] = anchor + timedelta(seconds=step_seconds * i)
+
+            if next_marker is not None:
+                current_marker = next_marker
+            else:
+                current_marker = timestamps[pending_row_indices[-1]]
+
+            pending_row_indices = []
 
         for line in f:
             line = line.strip()
             if not line:
                 continue
 
-            # Time marker like 12:14:18
-            if re.match(r"^\d{1,2}:\d{2}:\d{2}$", line):
-                if base_datetime is not None:
-                    try:
-                        t = datetime.strptime(line, "%H:%M:%S").time()
-                        current_time = datetime.combine(base_datetime.date(), t)
-                    except ValueError:
-                        current_time = None
+            # New metadata header may appear mid-file when a new session starts.
+            if line.upper().startswith("ESTABILIDAD"):
+                next_base = _parse_stability_header(line)
+                if next_base is not None:
+                    _finalize_pending(next_base)
+                    base_datetime = next_base
+                    current_marker = next_base
                 continue
 
-            parts = [p.strip() for p in line.split(";") if p.strip()]
+            if line.lower().startswith("ax;"):
+                continue
+
+            # Time marker like 12:14:18
+            if re.match(r"^\d{1,2}:\d{2}:\d{2}$", line):
+                try:
+                    t = datetime.strptime(line, "%H:%M:%S")
+                except ValueError:
+                    continue
+
+                if current_marker is not None:
+                    marker_dt = datetime.combine(current_marker.date(), t.time())
+                elif base_datetime is not None:
+                    marker_dt = datetime.combine(base_datetime.date(), t.time())
+                else:
+                    marker_dt = None
+
+                if marker_dt is not None:
+                    marker_dt = _normalize_marker(marker_dt)
+                    _finalize_pending(marker_dt)
+                continue
+
+            parts = [p.strip() for p in line.split(";")]
+            while parts and parts[-1] == "":
+                parts.pop()
+
             if len(parts) < 4:
                 continue
 
             values = []
+            numeric_count = 0
             for val in parts:
                 try:
                     values.append(float(val))
+                    numeric_count += 1
                 except ValueError:
-                    pass
+                    values.append(np.nan)
 
-            if len(values) < 4:
+            if numeric_count < 4:
                 continue
 
             rows.append(values)
-            base_times.append(current_time or base_datetime)
+            timestamps.append(None)
+            pending_row_indices.append(len(rows) - 1)
 
-            if timeantwifi_index is not None and timeantwifi_index < len(values):
-                timeantwifi_values.append(values[timeantwifi_index])
-            else:
-                timeantwifi_values.append(None)
+        _finalize_pending(next_marker=None)
 
     if not rows:
         return None
@@ -284,28 +347,6 @@ def parse_stability_file(stab_path):
         normalized.append(row[:max_cols])
 
     df = pd.DataFrame(normalized, columns=columns[:max_cols])
-
-    # Infer unit for timeantwifi
-    time_values = [v for v in timeantwifi_values if v is not None]
-    max_time = max(time_values) if time_values else None
-
-    use_microseconds = True
-    if max_time is not None and max_time > 1_000_000:
-        use_microseconds = False
-
-    timestamps = []
-    for base_dt, val in zip(base_times, timeantwifi_values):
-        if base_dt is None:
-            timestamps.append(None)
-            continue
-        if val is None or np.isnan(val):
-            timestamps.append(base_dt)
-            continue
-
-        if use_microseconds:
-            timestamps.append(base_dt + timedelta(microseconds=float(val)))
-        else:
-            timestamps.append(base_dt + timedelta(milliseconds=float(val)))
 
     df["timestamp"] = timestamps
     df = df.dropna(subset=["timestamp"])

@@ -101,20 +101,17 @@ El script `adaptive_hyperparam_search.py` entrena modelos de regresión de forma
 
 ---
 
-#### `--target-column` (default: `None`)
-**Descripción**: Especifica explícitamente el nombre de la columna objetivo. `None` = auto-detección.
+#### `--target-column` (default: `gy`)
+**Descripción**: Especifica explícitamente el nombre de la columna objetivo. El pipeline está fijado a `gy`.
 
 **Uso**:
 ```bash
---target-column None   # Auto-detect (busca entre omega_rad_s, gy, gz, etc.)
---target-column gz     # Explícitamente usar la columna 'gz'
---target-column omega_rad_s  # Usar omega en radianes/segundo
+--target-column gy     # Usar columna gy (target oficial)
 ```
 
 **Cuándo modificarlo**:
-- Tienes **múltiples opciones de target** y quieres probar una específica
-- Quieres usar **`gz`** en lugar del auto-detectado
-- Auto-detección falla → especificar manualmente
+- Normalmente no necesitas cambiarlo: el target oficial es `gy`
+- Úsalo para dejar explícita la intención en comandos reproducibles
 
 ---
 

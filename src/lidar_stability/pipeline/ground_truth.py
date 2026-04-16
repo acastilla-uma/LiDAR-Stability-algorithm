@@ -26,6 +26,16 @@ def _to_numeric_series(df: pd.DataFrame, column: str | None, fill_value: float =
     return pd.to_numeric(df[column], errors='coerce').fillna(fill_value)
 
 
+def _timestamp_to_elapsed_us(series: pd.Series) -> pd.Series:
+    dt = pd.to_datetime(series, errors='coerce')
+    valid = dt.dropna()
+    if valid.empty:
+        return pd.Series(np.full(len(series), np.nan, dtype=float), index=series.index)
+
+    ref = valid.iloc[0]
+    return (dt - ref).dt.total_seconds() * 1e6
+
+
 def _extract_roll_pitch_si(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
     roll_col = _resolve_column(df, ['roll_deg', 'roll'])
     pitch_col = _resolve_column(df, ['pitch_deg', 'pitch'], required=False)
@@ -69,8 +79,11 @@ def build_ground_truth(imu_df: pd.DataFrame, engine) -> pd.DataFrame:
 
     gt_df = pd.DataFrame(index=imu_df.index)
     if 't_us' in imu_df.columns:
-        gt_df['t_us'] = imu_df['t_us']
+        gt_df['t_us'] = pd.to_numeric(imu_df['t_us'], errors='coerce')
+    elif 'timestamp' in imu_df.columns:
+        gt_df['t_us'] = _timestamp_to_elapsed_us(imu_df['timestamp'])
     elif 'timeantwifi' in imu_df.columns:
+        logger.warning("Using raw timeantwifi as fallback for t_us; prefer timestamp-based timing.")
         gt_df['t_us'] = pd.to_numeric(imu_df['timeantwifi'], errors='coerce')
 
     if 'timestamp' in imu_df.columns:
@@ -132,8 +145,11 @@ def build_enhanced_ground_truth(
     if 'timestamp' in data_df.columns:
         gt_df['timestamp'] = data_df['timestamp']
     if 't_us' in data_df.columns:
-        gt_df['t_us'] = data_df['t_us']
+        gt_df['t_us'] = pd.to_numeric(data_df['t_us'], errors='coerce')
+    elif 'timestamp' in data_df.columns:
+        gt_df['t_us'] = _timestamp_to_elapsed_us(data_df['timestamp'])
     elif 'timeantwifi' in data_df.columns:
+        logger.warning("Using raw timeantwifi as fallback for t_us; prefer timestamp-based timing.")
         gt_df['t_us'] = pd.to_numeric(data_df['timeantwifi'], errors='coerce')
 
     gt_df['roll_deg'] = roll_deg

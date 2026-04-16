@@ -104,8 +104,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--target-column",
-        default=None,
-        help="Optional explicit target column. If omitted, auto-detection is used.",
+        default="gy",
+        help="Explicit target column (must be 'gy').",
     )
     parser.add_argument(
         "--feature-columns",
@@ -545,7 +545,7 @@ def main() -> int:
         "selected_files": selected_files_rel,
         "selected_files_count": len(selected_files_rel),
         "rows_after_filters": int(len(df)),
-        "resolved_target_name": "omega_rad_s",
+        "resolved_target_name": "gy",
         "resolved_feature_columns": list(used_features),
     }
 
@@ -609,7 +609,7 @@ def main() -> int:
         artifact = {
             "model": model,
             "feature_columns": used_features,
-            "target_name": "omega_rad_s",
+            "target_name": "gy",
             "model_key": model_key,
             "run_id": run_id,
             "params": effective_hyperparams,
@@ -633,8 +633,8 @@ def main() -> int:
             "max_files": args.max_files,
             "shuffle_files": args.shuffle_files,
             "query": args.query,
-            "target_column": args.target_column or "auto",
-            "target_name": "omega_rad_s",
+            "target_column": args.target_column,
+            "target_name": "gy",
             "feature_columns": used_features,
             "kfold": n_splits,
             "n_samples": result.n_samples,
@@ -673,7 +673,7 @@ def main() -> int:
                 "n_features": result.n_features,
                 "params": effective_hyperparams,
                 "feature_columns": list(used_features),
-                "target_name": "omega_rad_s",
+                "target_name": "gy",
                 "model_path": str(model_path),
                 "metrics_path": str(metrics_path),
                 "training_context": training_context,

@@ -46,7 +46,7 @@ OMEGA_CANDIDATES = [
     "wx_deg_s",
 ]
 SI_CANDIDATES = ["si", "si_mcu", "si_real", "stability_index", "stability"]
-TIME_CANDIDATES = ["t_us", "timestamp", "time", "timeantwifi"]
+TIME_CANDIDATES = ["timestamp", "time", "t_us", "timeantwifi"]
 
 
 def find_column(df: pd.DataFrame, candidates: list[str], forced: Optional[str], label: str) -> str:

@@ -82,8 +82,8 @@ def parse_args():
     )
     parser.add_argument(
         '--target-column',
-        default=None,
-        help='Optional explicit target column for w (omega). If omitted, gy/gz autodetection is used.',
+        default='gy',
+        help="Explicit target column (must be 'gy').",
     )
     parser.add_argument('--n-splits', type=int, default=5, help='Number of KFold splits')
     parser.add_argument('--random-state', type=int, default=42)
@@ -129,7 +129,7 @@ def main() -> int:
     artifact = {
         'model': model,
         'feature_columns': used_features,
-        'target_name': 'omega_rad_s',
+        'target_name': 'gy',
     }
     dump(artifact, model_path)
 
@@ -137,7 +137,7 @@ def main() -> int:
         **summary,
         'feature_columns': used_features,
         'input_glob': args.input_glob,
-        'target_column': args.target_column or 'auto',
+        'target_column': args.target_column,
     }
     metrics_path.write_text(json.dumps(metrics_payload, indent=2), encoding='utf-8')
 

@@ -103,10 +103,10 @@ HISTORY_WINDOW     = 4
 # factor < 1: el punto j-Ã©simo mÃ¡s antiguo tiene peso decay^j
 HISTORY_DECAY      = 0.70
 # La arista dominante en la ventana recibe este multiplicador en su score
-HISTORY_BONUS      = 0.45
+HISTORY_BONUS      = 0.65
 # Para cambiar de arista, la nueva debe ser al menos este ratio MEJOR
 # que la arista actual (histÃ©resis). 0.20 = 20% mejor.
-SWITCH_THRESHOLD   = 0.4
+SWITCH_THRESHOLD   = 0.7
 # Post-procesado: radio (en nÂº de puntos) del filtro de votaciÃ³n de vecinos
 SMOOTH_RADIUS      = 2
 # Un salto aislado se corrige si dura menos de SMOOTH_MIN_RUN puntos
@@ -324,17 +324,36 @@ def load_network_from_osmnx(bbox, network_type="drive", cache_dir=None):
     return edges
 
 
-def _network_covers_bbox(edges, bbox, min_matches=10):
-    """True si la red tiene al menos min_matches nodos dentro del bbox."""
-    min_lat, max_lat, min_lon, max_lon = bbox
-    count = 0
+def _network_covers_bbox(edges, bbox):
+    """True si el bbox de la red contiene completamente el bbox solicitado."""
+    if not edges:
+        return False
+
+    req_min_lat, req_max_lat, req_min_lon, req_max_lon = bbox
+
+    net_min_lat = float("inf")
+    net_max_lat = float("-inf")
+    net_min_lon = float("inf")
+    net_max_lon = float("-inf")
+
     for e in edges:
         for lon, lat in e["coords"]:
-            if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
-                count += 1
-                if count >= min_matches:
-                    return True
-    return False
+            if lat < net_min_lat:
+                net_min_lat = lat
+            if lat > net_max_lat:
+                net_max_lat = lat
+            if lon < net_min_lon:
+                net_min_lon = lon
+            if lon > net_max_lon:
+                net_max_lon = lon
+
+    if net_min_lat == float("inf"):
+        return False
+
+    return (
+        net_min_lat <= req_min_lat <= req_max_lat <= net_max_lat
+        and net_min_lon <= req_min_lon <= req_max_lon <= net_max_lon
+    )
 
 
 def get_network_for_bbox(bbox, local_graphml=None, cache_dir=None, verbose=True):
