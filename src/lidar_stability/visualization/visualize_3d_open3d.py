@@ -33,7 +33,7 @@ def find_segment_files(base_name: str, mapmatch_dir: Path) -> list[Path]:
 
 def visualize_3d_open3d(base_name: str, mapmatch_dir: str = None, laz_dir: str = None,
                         points_sample: int = 1_000_000, stability_col: str = "si",
-                        filter_ground: bool = True, padding_m: float = 100.0):
+                        filter_ground: bool = True, padding_m: float = 100.0, radius_m: float = 5.0):
     """
     Visualiza segmentos de ruta con nube LiDAR usando Open3D.
     
@@ -116,6 +116,35 @@ def visualize_3d_open3d(base_name: str, mapmatch_dir: str = None, laz_dir: str =
     cloud = load_laz_as_points(laz_tiles, x_min, y_min, x_max, y_max,
                                max_points=points_sample * 2, 
                                filter_ground=filter_ground)
+    
+    # FILTRADO POR RADIO: Seleccionar solo puntos dentro de 5m de la ruta
+    # Construir array de puntos de ruta (XY solamente)
+    route_points_xy = []
+    for seg in segments_data:
+        x, y = seg["x"], seg["y"]
+        for xi, yi in zip(x, y):
+            route_points_xy.append([xi, yi])
+    
+    route_points_xy = np.array(route_points_xy)
+    radius = radius_m  # metros (parámetro configurable)
+    
+    # Usar scipy.spatial.distance para calcular distancias mínimas
+    from scipy.spatial.distance import cdist
+    
+    # Calcular distancias XY desde cada punto LiDAR al punto de ruta más cercano
+    lidar_xy = cloud[:, :2]  # Solo X, Y
+    distances = cdist(lidar_xy, route_points_xy, metric='euclidean')
+    min_distances = distances.min(axis=1)  # Distancia mínima a cualquier punto de ruta
+    
+    # Filtrar: mantener solo puntos dentro del radio
+    mask = min_distances <= radius
+    cloud = cloud[mask]
+    
+    logger.info(f"Filtrados puntos dentro de {radius}m: {len(cloud)} de {mask.shape[0]} puntos")
+    
+    if len(cloud) == 0:
+        logger.warning("⚠️  No hay puntos LiDAR dentro del radio de 5m de la ruta")
+        logger.info("Intenta aumentar el radio con: --radius 10")
     
     if len(cloud) > points_sample:
         logger.info(f"Muestreando {points_sample} puntos de {len(cloud)} disponibles")
@@ -222,6 +251,8 @@ def main():
                         help="Incluir todos los puntos sin filtrar el suelo")
     parser.add_argument("--padding", type=float, default=100.0,
                         help="Margen alrededor de la ruta en metros")
+    parser.add_argument("--radius", type=float, default=5.0,
+                        help="Radio en metros alrededor de la ruta para filtrar puntos LiDAR")
     
     args = parser.parse_args()
 
@@ -234,7 +265,8 @@ def main():
             points_sample=args.points_sample,
             stability_col=args.stability_col,
             filter_ground=filter_ground,
-            padding_m=args.padding
+            padding_m=args.padding,
+            radius_m=args.radius
         )
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
