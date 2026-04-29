@@ -18,7 +18,9 @@ Usage:
 """
 
 import argparse
+import copy
 import re
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -26,15 +28,146 @@ import numpy as np
 import pandas as pd
 from pyproj import Transformer
 
+try:
+    from .outlier_tracker import OutlierTracker
+except ImportError:
+    from outlier_tracker import OutlierTracker
 
-def parse_gps_file(gps_path):
+
+DEFAULT_OUTLIER_FILTER_CONFIG = {
+    "enabled": True,
+    "tracking": {
+        "enabled": True,
+        "output_subdir": "outliers",
+    },
+    "gps": {
+        "max_hdop": 15.0,
+        "min_fix": 1,
+        "min_satellites": 4,
+        "jump_threshold_m": 100.0,
+        "isolated_neighbor_distance_m": 50.0,
+        "isolated_window_size": 2,
+        "isolated_min_neighbors": 1,
+    },
+    "imu": {
+        "enabled": True,
+        "axes": ["ax", "ay", "az"],
+        "window_size": 41,
+        "min_window_points": 15,
+        "iqr_multiplier": 3.0,
+        "mad_multiplier": 6.0,
+        "iqr_eps": 1e-6,
+        "min_axes_to_flag": 2,
+    },
+}
+
+
+def _deep_update_dict(base, updates):
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_update_dict(base[key], value)
+        else:
+            base[key] = value
+
+
+def load_outlier_filter_config():
+    """Load defaults and override with config/config.py when available."""
+    cfg = copy.deepcopy(DEFAULT_OUTLIER_FILTER_CONFIG)
+
+    project_root = Path(__file__).resolve().parents[3]
+    root_str = str(project_root)
+    if root_str not in sys.path:
+        sys.path.insert(0, root_str)
+
+    try:
+        from config.config import OUTLIER_FILTER_CONFIG
+
+        if isinstance(OUTLIER_FILTER_CONFIG, dict):
+            _deep_update_dict(cfg, OUTLIER_FILTER_CONFIG)
+    except Exception:
+        pass
+
+    try:
+        from config.config import GPS_VALIDATION
+
+        if isinstance(GPS_VALIDATION, dict):
+            gps_cfg = cfg.setdefault("gps", {})
+            if "max_hdop" in GPS_VALIDATION:
+                gps_cfg["max_hdop"] = GPS_VALIDATION["max_hdop"]
+            if "min_satellites" in GPS_VALIDATION:
+                gps_cfg["min_satellites"] = GPS_VALIDATION["min_satellites"]
+    except Exception:
+        pass
+
+    return cfg
+
+
+def _drop_internal_columns(df):
+    if df is None or df.empty:
+        return df
+    internal_cols = [c for c in df.columns if c.startswith("_")]
+    if not internal_cols:
+        return df
+    return df.drop(columns=internal_cols, errors="ignore")
+
+
+def _apply_filter_with_tracking(
+    df,
+    mask,
+    *,
+    tracker,
+    source_key,
+    stage,
+    reason,
+    source_file,
+    metadata=None,
+):
+    if df is None or df.empty:
+        return df
+
+    if not isinstance(mask, pd.Series):
+        mask = pd.Series(mask, index=df.index)
+    mask = mask.reindex(df.index).fillna(False).astype(bool)
+
+    before_rows = len(df)
+    dropped_rows = int(mask.sum())
+
+    if tracker is not None:
+        tracker.log_filter_step(
+            source_key=source_key,
+            stage=stage,
+            filter_name=reason,
+            before_rows=before_rows,
+            dropped_rows=dropped_rows,
+        )
+
+    if dropped_rows <= 0:
+        return df
+
+    if tracker is not None:
+        tracker.log_drops(
+            source_key=source_key,
+            stage=stage,
+            reason=reason,
+            source_file=str(source_file),
+            dropped_df=df.loc[mask].copy(),
+            metadata=metadata,
+        )
+
+    return df.loc[~mask].copy()
+
+
+def parse_gps_file(gps_path, tracker=None, source_key=None, gps_filter_config=None):
     """Parse and clean one GPS file."""
+    source_key = source_key or Path(gps_path).stem
+    gps_filter_config = gps_filter_config or {}
+
     rows = []
     with open(gps_path, "r", encoding="latin-1") as f:
         header = f.readline().strip()
         columns = f.readline().strip()
 
-        for line in f:
+        for line_no, line in enumerate(f, start=3):
             line = line.strip()
             if not line:
                 continue
@@ -70,14 +203,6 @@ def parse_gps_file(gps_path):
             except ValueError:
                 continue
 
-            # Basic filters
-            if not (35 <= lat <= 45 and -10 <= lon <= 5):
-                continue
-            if not (0 < alt < 3000):
-                continue
-            if speed_kmh < 0 or speed_kmh > 200:
-                continue
-
             rows.append({
                 "timestamp": timestamp,
                 "hora_raspberry": hora_raspberry,
@@ -90,6 +215,7 @@ def parse_gps_file(gps_path):
                 "fix": fix,
                 "numsats": numsats,
                 "speed_kmh": speed_kmh,
+                "_raw_line_no": line_no,
             })
 
     if not rows:
@@ -97,29 +223,142 @@ def parse_gps_file(gps_path):
 
     df = pd.DataFrame(rows)
 
+    # Basic filters
+    lat_lon_mask = ~df["lat"].between(35, 45) | ~df["lon"].between(-10, 5)
+    df = _apply_filter_with_tracking(
+        df,
+        lat_lon_mask,
+        tracker=tracker,
+        source_key=source_key,
+        stage="gps",
+        reason="gps_invalid_lat_lon",
+        source_file=gps_path,
+    )
+
+    alt_mask = ~df["alt"].between(0, 3000, inclusive="neither")
+    df = _apply_filter_with_tracking(
+        df,
+        alt_mask,
+        tracker=tracker,
+        source_key=source_key,
+        stage="gps",
+        reason="gps_invalid_altitude",
+        source_file=gps_path,
+    )
+
+    speed_mask = (df["speed_kmh"] < 0) | (df["speed_kmh"] > 200)
+    df = _apply_filter_with_tracking(
+        df,
+        speed_mask,
+        tracker=tracker,
+        source_key=source_key,
+        stage="gps",
+        reason="gps_invalid_speed",
+        source_file=gps_path,
+    )
+
+    max_hdop = gps_filter_config.get("max_hdop")
+    if max_hdop is not None and "hdop" in df.columns:
+        hdop_mask = pd.to_numeric(df["hdop"], errors="coerce") > float(max_hdop)
+        df = _apply_filter_with_tracking(
+            df,
+            hdop_mask,
+            tracker=tracker,
+            source_key=source_key,
+            stage="gps",
+            reason=f"gps_hdop_gt_{max_hdop}",
+            source_file=gps_path,
+        )
+
+    min_fix = gps_filter_config.get("min_fix")
+    if min_fix is not None and "fix" in df.columns:
+        fix_mask = pd.to_numeric(df["fix"], errors="coerce") < int(min_fix)
+        df = _apply_filter_with_tracking(
+            df,
+            fix_mask,
+            tracker=tracker,
+            source_key=source_key,
+            stage="gps",
+            reason=f"gps_fix_lt_{min_fix}",
+            source_file=gps_path,
+        )
+
+    min_satellites = gps_filter_config.get("min_satellites")
+    if min_satellites is not None and "numsats" in df.columns:
+        sats_mask = pd.to_numeric(df["numsats"], errors="coerce") < int(min_satellites)
+        df = _apply_filter_with_tracking(
+            df,
+            sats_mask,
+            tracker=tracker,
+            source_key=source_key,
+            stage="gps",
+            reason=f"gps_satellites_lt_{min_satellites}",
+            source_file=gps_path,
+        )
+
+    if df.empty:
+        return None
+
     # Add UTM coordinates for distance calculations
     transformer = Transformer.from_crs("EPSG:4326", "EPSG:25830", always_xy=True)
     x_utm, y_utm = transformer.transform(df["lon"].values, df["lat"].values)
     df["x_utm"] = x_utm
     df["y_utm"] = y_utm
 
-    # Filter small anomalies (< 100m jumps)
+    # Filter jumps between consecutive points
+    jump_threshold = float(gps_filter_config.get("jump_threshold_m", 100.0))
     distances = np.sqrt(np.diff(x_utm) ** 2 + np.diff(y_utm) ** 2)
     anomaly_mask = np.zeros(len(df), dtype=bool)
     for i, dist in enumerate(distances):
-        if dist > 100:
+        if dist > jump_threshold:
             anomaly_mask[i] = True
             anomaly_mask[i + 1] = True
 
-    df = df[~anomaly_mask].copy()
+    df = _apply_filter_with_tracking(
+        df,
+        pd.Series(anomaly_mask, index=df.index),
+        tracker=tracker,
+        source_key=source_key,
+        stage="gps",
+        reason=f"gps_jump_gt_{jump_threshold}m",
+        source_file=gps_path,
+        metadata={"jump_threshold_m": jump_threshold},
+    )
+
+    if df.empty:
+        return None
 
     # Remove isolated points with few nearby neighbors
-    df = filter_isolated_points(df, neighbor_distance=50, window_size=2, min_neighbors=1)
+    keep_mask = filter_isolated_points(
+        df,
+        neighbor_distance=float(gps_filter_config.get("isolated_neighbor_distance_m", 50.0)),
+        window_size=int(gps_filter_config.get("isolated_window_size", 2)),
+        min_neighbors=int(gps_filter_config.get("isolated_min_neighbors", 1)),
+        return_keep_mask=True,
+    )
+    df = _apply_filter_with_tracking(
+        df,
+        ~keep_mask,
+        tracker=tracker,
+        source_key=source_key,
+        stage="gps",
+        reason="gps_isolated_point",
+        source_file=gps_path,
+    )
 
-    return df
+    if df is None or df.empty:
+        return None
+
+    return _drop_internal_columns(df)
 
 
-def filter_isolated_points(df, neighbor_distance=50, window_size=2, min_neighbors=1):
+def filter_isolated_points(
+    df,
+    neighbor_distance=50,
+    window_size=2,
+    min_neighbors=1,
+    return_keep_mask=False,
+):
     """
     Remove points with too few nearby neighbors in a local window.
 
@@ -127,6 +366,8 @@ def filter_isolated_points(df, neighbor_distance=50, window_size=2, min_neighbor
     among the previous/next window_size points.
     """
     if df is None or df.empty:
+        if return_keep_mask:
+            return pd.Series(dtype=bool)
         return df
 
     x = df["x_utm"].values
@@ -149,6 +390,9 @@ def filter_isolated_points(df, neighbor_distance=50, window_size=2, min_neighbor
             if count >= min_neighbors:
                 break
         keep_mask[i] = count >= min_neighbors
+
+    if return_keep_mask:
+        return pd.Series(keep_mask, index=df.index)
 
     return df[keep_mask].copy()
 
@@ -209,8 +453,68 @@ def _parse_stability_header(header_line):
         return None
 
 
-def parse_stability_file(stab_path):
+def _rolling_mad(values):
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if len(values) == 0:
+        return np.nan
+    median = np.median(values)
+    return np.median(np.abs(values - median))
+
+
+def detect_imu_outliers_rolling(df, imu_filter_config):
+    """Detect IMU outliers with rolling robust statistics (IQR with MAD fallback)."""
+    if df is None or df.empty:
+        return pd.Series(dtype=bool), pd.DataFrame(index=df.index if df is not None else None)
+
+    axes = [axis for axis in imu_filter_config.get("axes", ["ax", "ay", "az"]) if axis in df.columns]
+    if not axes:
+        return pd.Series(False, index=df.index), pd.DataFrame(index=df.index)
+
+    window_size = int(imu_filter_config.get("window_size", 41))
+    min_window_points = int(imu_filter_config.get("min_window_points", 15))
+    iqr_multiplier = float(imu_filter_config.get("iqr_multiplier", 3.0))
+    mad_multiplier = float(imu_filter_config.get("mad_multiplier", 6.0))
+    iqr_eps = float(imu_filter_config.get("iqr_eps", 1e-6))
+
+    axis_masks = {}
+    for axis in axes:
+        series = pd.to_numeric(df[axis], errors="coerce")
+        rolling = series.rolling(window=window_size, center=True, min_periods=min_window_points)
+
+        median = rolling.median()
+        q1 = rolling.quantile(0.25)
+        q3 = rolling.quantile(0.75)
+        iqr = q3 - q1
+
+        lower = q1 - (iqr_multiplier * iqr)
+        upper = q3 + (iqr_multiplier * iqr)
+        iqr_mask = (series < lower) | (series > upper)
+
+        mad = rolling.apply(_rolling_mad, raw=True)
+        mad_sigma = 1.4826 * mad
+        mad_limit = mad_multiplier * mad_sigma
+        mad_mask = (series - median).abs() > mad_limit
+
+        use_iqr_mask = (iqr > iqr_eps).fillna(False).astype(bool).to_numpy()
+        iqr_values = iqr_mask.fillna(False).astype(bool).to_numpy()
+        mad_values = mad_mask.fillna(False).astype(bool).to_numpy()
+        axis_values = np.where(use_iqr_mask, iqr_values, mad_values)
+        axis_masks[axis] = pd.Series(axis_values, index=df.index, dtype=bool)
+
+    axis_mask_df = pd.DataFrame(axis_masks, index=df.index)
+    min_axes_to_flag = int(imu_filter_config.get("min_axes_to_flag", 2))
+    flagged_axes_count = axis_mask_df.sum(axis=1)
+    combined_mask = flagged_axes_count >= min_axes_to_flag
+
+    return combined_mask.fillna(False), axis_mask_df.fillna(False)
+
+
+def parse_stability_file(stab_path, tracker=None, source_key=None, imu_filter_config=None):
     """Parse stability file and build timestamp via dynamic interpolation between clock markers."""
+    source_key = source_key or Path(stab_path).stem
+    imu_filter_config = imu_filter_config or {}
+
     with open(stab_path, "r", encoding="latin-1") as f:
         header_line = f.readline().strip()
         columns_line = f.readline().strip()
@@ -224,6 +528,7 @@ def parse_stability_file(stab_path):
         columns = raw_columns
         rows = []
         timestamps = []
+        raw_line_numbers = []
         pending_row_indices = []
         current_marker = base_datetime
 
@@ -272,7 +577,7 @@ def parse_stability_file(stab_path):
 
             pending_row_indices = []
 
-        for line in f:
+        for line_no, line in enumerate(f, start=3):
             line = line.strip()
             if not line:
                 continue
@@ -329,6 +634,7 @@ def parse_stability_file(stab_path):
 
             rows.append(values)
             timestamps.append(None)
+            raw_line_numbers.append(line_no)
             pending_row_indices.append(len(rows) - 1)
 
         _finalize_pending(next_marker=None)
@@ -349,9 +655,42 @@ def parse_stability_file(stab_path):
     df = pd.DataFrame(normalized, columns=columns[:max_cols])
 
     df["timestamp"] = timestamps
-    df = df.dropna(subset=["timestamp"])
+    df["_raw_line_no"] = raw_line_numbers
+    df = df.dropna(subset=["timestamp"]).copy()
 
-    return df
+    if imu_filter_config.get("enabled", True):
+        imu_mask, axis_mask_df = detect_imu_outliers_rolling(df, imu_filter_config)
+        if not axis_mask_df.empty:
+            flagged_axes_count = axis_mask_df.sum(axis=1).astype(int)
+            flagged_axes = axis_mask_df.apply(
+                lambda row: "|".join([axis for axis, is_flagged in row.items() if bool(is_flagged)]),
+                axis=1,
+            )
+        else:
+            flagged_axes_count = pd.Series(0, index=df.index)
+            flagged_axes = pd.Series("", index=df.index)
+
+        df = _apply_filter_with_tracking(
+            df,
+            imu_mask,
+            tracker=tracker,
+            source_key=source_key,
+            stage="stability",
+            reason="imu_rolling_outlier",
+            source_file=stab_path,
+            metadata={
+                "flagged_axes_count": flagged_axes_count,
+                "flagged_axes": flagged_axes,
+                "imu_window_size": int(imu_filter_config.get("window_size", 41)),
+                "imu_iqr_multiplier": float(imu_filter_config.get("iqr_multiplier", 3.0)),
+                "imu_mad_multiplier": float(imu_filter_config.get("mad_multiplier", 6.0)),
+            },
+        )
+
+    if df is None or df.empty:
+        return None
+
+    return _drop_internal_columns(df)
 
 
 def match_by_timestamp(gps_df, stab_df, tolerance_seconds):
@@ -413,6 +752,13 @@ def build_pairs(gps_dir, stab_dir):
 def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000, map_matching=False):
     gps_dir = data_dir / "GPS"
     stab_dir = data_dir / "Stability"
+    outlier_cfg = load_outlier_filter_config()
+    outlier_enabled = bool(outlier_cfg.get("enabled", True))
+    gps_filter_cfg = outlier_cfg.get("gps", {}) if outlier_enabled else {}
+    imu_filter_cfg = outlier_cfg.get("imu", {}) if outlier_enabled else {"enabled": False}
+    tracking_cfg = outlier_cfg.get("tracking", {})
+    tracking_enabled = bool(outlier_enabled and tracking_cfg.get("enabled", True))
+    outlier_output_dir = output_dir / tracking_cfg.get("output_subdir", "outliers")
 
     pairs = build_pairs(gps_dir, stab_dir)
     if not pairs:
@@ -438,13 +784,35 @@ def process_all(data_dir, output_dir, tolerance_seconds, max_gap_meters=1000, ma
     report_lines.append("DOBACK ROUTE PROCESSING REPORT")
     report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     report_lines.append(f"Max gap for splitting: {max_gap_meters}m")
+    report_lines.append(
+        "Outlier filtering: "
+        + ("ENABLED" if outlier_enabled else "DISABLED")
+        + " (IMU rolling windows + GPS quality checks)"
+    )
     if map_matching:
         report_lines.append("Map-matching: ENABLED (GPS corrected to road network)")
     report_lines.append("")
 
     for key, gps_path, stab_path in pairs:
-        gps_df = parse_gps_file(gps_path)
-        stab_df = parse_stability_file(stab_path)
+        tracker = OutlierTracker(enabled=tracking_enabled)
+        gps_df = parse_gps_file(
+            gps_path,
+            tracker=tracker,
+            source_key=key,
+            gps_filter_config=gps_filter_cfg,
+        )
+        stab_df = parse_stability_file(
+            stab_path,
+            tracker=tracker,
+            source_key=key,
+            imu_filter_config=imu_filter_cfg,
+        )
+
+        if tracking_enabled:
+            dropped_path, summary_path = tracker.export(outlier_output_dir, key)
+            report_lines.append(
+                f"{key}: audit outliers -> {dropped_path.relative_to(output_dir)} | {summary_path.relative_to(output_dir)}"
+            )
 
         # Apply map-matching if enabled  
         if map_matching and gps_df is not None and not gps_df.empty:

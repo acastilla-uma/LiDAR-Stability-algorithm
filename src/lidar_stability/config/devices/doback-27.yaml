@@ -1,0 +1,25 @@
+device_id: "27"
+device_name: DOBACK027
+parque: MONTSENY
+modelo: BRP
+numero_serie: 22
+
+stability_model:
+  k1: 1.50  # ⚠️ CRITICAL: 30% difference from standard 1.15
+  k2: 1.50
+  k3: 0.86
+  k4_mm: 1100
+  coeff: 2.13
+  d1_m: 0.96
+  s_mm: 1880
+  alpha: 40
+  alphav: 45
+
+terrain:
+  vehicle_track: 1880  # s_mm value
+
+hardware:
+  gpio_rot: 23
+  alarm: 8
+  ipl_tl: "100.97.93.131"
+  can: "si"

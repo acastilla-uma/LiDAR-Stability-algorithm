@@ -18,14 +18,14 @@ import pandas as pd
 from joblib import dump
 from sklearn.ensemble import ExtraTreesRegressor, GradientBoostingRegressor, RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import KFold
+from sklearn.model_selection import GroupKFold, KFold
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SRC_ROOT = SCRIPT_DIR.parent.parent
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from lidar_stability.ml.feature_engineering import build_w_training_dataset, load_featured_data
+from lidar_stability.ml.feature_engineering import build_w_training_dataset
 
 
 @dataclass
@@ -48,6 +48,7 @@ MODEL_HPARAM_KEYS = {
         "rf_min_samples_leaf",
         "rf_max_depth",
         "rf_max_features",
+        "rf_min_samples_split",
     },
     "extra_trees": {
         "extra_trees_n_estimators",
@@ -65,6 +66,8 @@ MODEL_HPARAM_KEYS = {
         "gbr_min_samples_split",
     },
 }
+
+SOURCE_FILE_COLUMN = "__source_file"
 
 
 def parse_args() -> argparse.Namespace:
@@ -119,6 +122,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional pandas query string to filter rows before training.",
     )
     parser.add_argument(
+        "--cv-group-by",
+        choices=["row", "source_file"],
+        default="row",
+        help="How to group rows when building CV folds.",
+    )
+    parser.add_argument(
         "--models",
         nargs="+",
         default=["rf"],
@@ -126,6 +135,12 @@ def parse_args() -> argparse.Namespace:
         help="Models to train",
     )
     parser.add_argument("--n-splits", type=int, default=5, help="K-Fold splits")
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=-1,
+        help="Parallel workers for tree-based models that support n_jobs (-1 uses all available cores)",
+    )
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument(
         "--output-dir",
@@ -187,6 +202,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="sqrt",
         help="RandomForest: max features at each split (sqrt, log2, or int)",
+    )
+    parser.add_argument(
+        "--rf-min-samples-split",
+        type=int,
+        default=2,
+        help="RandomForest: minimum samples required to split an internal node",
     )
 
     # ExtraTrees hyperparameters
@@ -301,6 +322,16 @@ def resolve_input_files(args: argparse.Namespace, repo_root: Path) -> list[Path]
     return unique
 
 
+def load_featured_with_source(paths: list[Path]) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for p in paths:
+        frame = pd.read_csv(p, low_memory=False)
+        frame = frame.copy()
+        frame[SOURCE_FILE_COLUMN] = p.name
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def _parse_max_features(value):
     if value is None:
         return None
@@ -413,7 +444,7 @@ def build_training_runs(args: argparse.Namespace, base_hyperparams: dict) -> lis
     return runs
 
 
-def build_model(model_key: str, random_state: int, hyperparams: dict = None):
+def build_model(model_key: str, random_state: int, hyperparams: dict = None, n_jobs: int = -1):
     """Build a model with specified hyperparameters.
     
     Args:
@@ -429,8 +460,9 @@ def build_model(model_key: str, random_state: int, hyperparams: dict = None):
         return RandomForestRegressor(
             n_estimators=hyperparams.get("rf_n_estimators", 400),
             random_state=random_state,
-            n_jobs=-1,
+            n_jobs=int(n_jobs),
             min_samples_leaf=hyperparams.get("rf_min_samples_leaf", 2),
+            min_samples_split=hyperparams.get("rf_min_samples_split", 2),
             max_depth=hyperparams.get("rf_max_depth", None),
             max_features=hyperparams.get("rf_max_features", "sqrt"),
         )
@@ -438,7 +470,7 @@ def build_model(model_key: str, random_state: int, hyperparams: dict = None):
         return ExtraTreesRegressor(
             n_estimators=hyperparams.get("extra_trees_n_estimators", 500),
             random_state=random_state,
-            n_jobs=-1,
+            n_jobs=int(n_jobs),
             min_samples_leaf=hyperparams.get("extra_trees_min_samples_leaf", 2),
             min_samples_split=hyperparams.get("extra_trees_min_samples_split", 2),
             max_depth=hyperparams.get("extra_trees_max_depth", None),
@@ -457,7 +489,59 @@ def build_model(model_key: str, random_state: int, hyperparams: dict = None):
     raise ValueError(f"Unknown model key: {model_key}")
 
 
-def train_kfold(model_key: str, X: pd.DataFrame, y: pd.Series, n_splits: int, random_state: int, hyperparams: dict = None):
+def resolve_cv_groups(
+    df: pd.DataFrame,
+    cv_group_by: str,
+    source_col: str = SOURCE_FILE_COLUMN,
+) -> pd.Series | None:
+    if cv_group_by == "row":
+        return None
+    if source_col not in df.columns:
+        raise ValueError(
+            f"Requested --cv-group-by {cv_group_by}, but source column '{source_col}' is missing"
+        )
+    return df[source_col].astype(str)
+
+
+def build_cv_splits(
+    X: pd.DataFrame,
+    n_splits: int,
+    random_state: int,
+    groups: pd.Series | None = None,
+    cv_group_by: str = "row",
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    if groups is not None:
+        n_groups = int(groups.nunique())
+        if n_groups < n_splits:
+            raise ValueError(
+                f"--cv-group-by {cv_group_by} requires at least {n_splits} unique groups, "
+                f"but only {n_groups} were found"
+            )
+        splitter = GroupKFold(n_splits=n_splits)
+        return list(splitter.split(X, groups=groups))
+
+    splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    return list(splitter.split(X))
+
+
+def _to_contiguous_feature_matrix(X: pd.DataFrame) -> np.ndarray:
+    return np.ascontiguousarray(X.to_numpy(dtype=float, copy=False))
+
+
+def _to_contiguous_target_array(y: pd.Series) -> np.ndarray:
+    return np.ascontiguousarray(np.asarray(y, dtype=float))
+
+
+def train_kfold(
+    model_key: str,
+    X: pd.DataFrame,
+    y: pd.Series,
+    n_splits: int,
+    random_state: int,
+    hyperparams: dict = None,
+    n_jobs: int = -1,
+    split_indices: list[tuple[np.ndarray, np.ndarray]] | None = None,
+):
     """Train model with K-Fold cross-validation.
     
     Args:
@@ -470,23 +554,26 @@ def train_kfold(model_key: str, X: pd.DataFrame, y: pd.Series, n_splits: int, ra
     """
     if hyperparams is None:
         hyperparams = {}
+    if split_indices is None:
+        split_indices = build_cv_splits(X, n_splits=n_splits, random_state=random_state)
 
-    splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    X_values = _to_contiguous_feature_matrix(X)
+    y_values = _to_contiguous_target_array(y)
 
     fold_metrics: list[dict] = []
-    for fold_idx, (train_idx, test_idx) in enumerate(splitter.split(X), start=1):
-        model = build_model(model_key, random_state + fold_idx, hyperparams)
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
+    for fold_idx, (train_idx, test_idx) in enumerate(split_indices, start=1):
+        model = build_model(model_key, random_state + fold_idx, hyperparams, n_jobs=n_jobs)
+        model.fit(X_values[train_idx], y_values[train_idx])
 
-        y_pred = model.predict(X.iloc[test_idx])
-        y_true = y.iloc[test_idx]
+        y_pred = model.predict(X_values[test_idx])
+        y_true = y_values[test_idx]
 
         rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
         mae = float(mean_absolute_error(y_true, y_pred))
         r2 = float(r2_score(y_true, y_pred))
         fold_metrics.append({"fold": fold_idx, "rmse": rmse, "mae": mae, "r2": r2})
 
-    final_model = build_model(model_key, random_state, hyperparams)
+    final_model = build_model(model_key, random_state, hyperparams, n_jobs=n_jobs)
     final_model.fit(X, y)
 
     rmse_values = [m["rmse"] for m in fold_metrics]
@@ -520,7 +607,7 @@ def main() -> int:
     if len(csv_paths) > 10:
         print("  - ...")
 
-    df = load_featured_data(csv_paths)
+    df = load_featured_with_source(csv_paths)
     if df.empty:
         raise RuntimeError("Loaded dataframe is empty")
 
@@ -536,6 +623,8 @@ def main() -> int:
         feature_columns=args.feature_columns,
         target_column=args.target_column,
     )
+    clean_df = df.loc[X.index].copy()
+    cv_groups = resolve_cv_groups(clean_df, args.cv_group_by)
 
     selected_files_rel = [str(p.relative_to(repo_root)) for p in csv_paths]
     training_context = {
@@ -547,9 +636,17 @@ def main() -> int:
         "rows_after_filters": int(len(df)),
         "resolved_target_name": "gy",
         "resolved_feature_columns": list(used_features),
+        "cv_group_by": args.cv_group_by,
     }
 
     n_splits = max(2, int(args.n_splits))
+    split_indices = build_cv_splits(
+        X,
+        n_splits=n_splits,
+        random_state=int(args.random_state),
+        groups=cv_groups,
+        cv_group_by=args.cv_group_by,
+    )
     out_dir = (repo_root / args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -579,6 +676,8 @@ def main() -> int:
             n_splits=n_splits,
             random_state=int(args.random_state),
             hyperparams=hyperparams,
+            n_jobs=int(args.n_jobs),
+            split_indices=split_indices,
         )
 
         if run_id == "default" and not args.run_config:
@@ -633,6 +732,7 @@ def main() -> int:
             "max_files": args.max_files,
             "shuffle_files": args.shuffle_files,
             "query": args.query,
+            "cv_group_by": args.cv_group_by,
             "target_column": args.target_column,
             "target_name": "gy",
             "feature_columns": used_features,
@@ -674,6 +774,7 @@ def main() -> int:
                 "params": effective_hyperparams,
                 "feature_columns": list(used_features),
                 "target_name": "gy",
+                "cv_group_by": args.cv_group_by,
                 "model_path": str(model_path),
                 "metrics_path": str(metrics_path),
                 "training_context": training_context,
@@ -720,4 +821,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

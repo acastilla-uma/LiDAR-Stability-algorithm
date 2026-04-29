@@ -10,7 +10,7 @@ vehicle:
   
   # Geometry
   track_width_m: 1.100  # Firmware-aligned base width (s in .ino, meters)
-  cg_height_m: 4.164    # Derived h from .ino defaults: sqrt((d1*1000)^2-(s/2)^2)
+  cg_height_src/lidar_stability/config/devicesm: 4.164    # Derived h from .ino defaults: sqrt((d1*1000)^2-(s/2)^2)
   wheelbase_m: 1.100    # Firmware-aligned k4 default (meters)
   
   # Inertia

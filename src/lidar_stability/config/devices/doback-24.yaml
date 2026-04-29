@@ -1,0 +1,26 @@
+device_id: "24"
+device_name: DOBACK024
+parque: ALCOBENDAS
+modelo: ESCALA
+numero_serie: 27
+
+stability_model:
+  k1: 1.15
+  k2: 2.0
+  k3: 0.5
+  k4_mm: 2500
+  coeff: 5.00
+  d1_m: 1.88
+  s_mm: 2215
+  alpha: 55
+  alphav: 64
+
+terrain:
+  vehicle_track: 2215  # s_mm value
+
+hardware:
+  gpio_rot: 23
+  alarm: 8
+  anular_frontal: "SI"
+  ipl_tl: "100.85.213.94"
+  can: "si"

@@ -41,6 +41,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SRC_ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SRC_ROOT))
 
+from lidar_stability.config.device_constants import (
+    assign_literal_device_constants,
+    resolve_device_config_from_filename,
+)
 from lidar_stability.lidar.laz_reader import LAZReader
 from lidar_stability.lidar.terrain_features import TerrainFeatureExtractor
 
@@ -283,6 +287,8 @@ def enrich_route_with_terrain_features(mapmatch_path: str,
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Required columns missing: {missing}")
+
+    df = assign_literal_device_constants(df, mapmatch_path.name)
     
     # Initialize terrain feature columns
     feature_columns = FEATURE_COLUMNS
@@ -438,6 +444,19 @@ def enrich_doback_batch(doback: str,
     if not files:
         raise FileNotFoundError(f"No map-matched files found for {doback_id} in {mapmatch_root}")
 
+    try:
+        from lidar_stability.config.device_registry import get_registry
+
+        registry = get_registry()
+        device_config = registry.get_config(doback_id)
+        vehicle_track = device_config['terrain']['vehicle_track'] / 1000.0
+        logger.info(f"✓ Loaded {doback_id} vehicle_track={vehicle_track:.3f}m from DeviceRegistry")
+    except Exception as exc:
+        logger.warning(
+            f"⚠ Could not load device config for {doback_id} ({exc}). "
+            f"Using vehicle_track={vehicle_track:.3f}m"
+        )
+
     logger.info(f"Found {len(files)} files for {doback_id}")
     success = 0
     failed = 0
@@ -496,13 +515,25 @@ def main():
                 project_root = Path(__file__).resolve().parents[3]
                 output = str(project_root / "Doback-Data" / "featured" / mapmatch_path.name)
 
+            # Extract device_id from filename and get correct vehicle_track (NEW)
+            vehicle_track = args.vehicle_track  # Start with command-line arg
+            try:
+                device_id, device_config = resolve_device_config_from_filename(mapmatch_path.name)
+                vehicle_track = device_config['terrain']['vehicle_track'] / 1000.0
+                logger.info(f"✓ Loaded DOBACK{device_id} vehicle_track={vehicle_track:.3f}m from DeviceRegistry")
+            except Exception as e:
+                logger.warning(
+                    f"⚠ Could not load device config from {mapmatch_path.name} ({e}). "
+                    f"Using default vehicle_track={vehicle_track:.3f}m"
+                )
+
             enrich_route_with_terrain_features(
                 mapmatch_path=args.mapmatch,
                 laz_dir=args.laz_dir,
                 output_path=output,
                 search_radius=args.search_radius,
                 dem_size=args.dem_size,
-                vehicle_track=args.vehicle_track,
+                vehicle_track=vehicle_track,
                 sampling=args.sampling,
             )
         else:
@@ -530,4 +561,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

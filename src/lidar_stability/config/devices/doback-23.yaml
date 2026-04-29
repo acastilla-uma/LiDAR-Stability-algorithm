@@ -1,0 +1,26 @@
+device_id: "23"
+device_name: DOBACK023
+parque: ALCOBENDAS
+modelo: BRP
+numero_serie: 24
+
+stability_model:
+  k1: 1.15
+  k2: 2.05
+  k3: 0.85
+  k4_mm: 1100
+  coeff: 1.89
+  d1_m: 2.03
+  s_mm: 2450
+  alpha: 58.02
+  alphav: 54
+
+terrain:
+  vehicle_track: 2450  # s_mm value
+
+hardware:
+  gpio_rot: 23
+  alarm: 8
+  anular_frontal: "SI"
+  ipl_tl: "100.108.80.6"
+  can: "no"
