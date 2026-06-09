@@ -1,0 +1,8 @@
+{
+  "featured_csv_files": 448,
+  "featured_source_keys": 76,
+  "matched_outlier_sources": 76,
+  "total_imu_rows_before_filter": 8187106,
+  "total_rows_dropped_by_imu_filter": 115386,
+  "total_axis_flags": 313987
+}

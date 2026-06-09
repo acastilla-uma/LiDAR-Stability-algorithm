@@ -162,6 +162,14 @@ Funcion:
 - Calcula e imprime features de terreno por punto (`phi_lidar`, `tri`, `ruggedness`, etc.).
 - Permite usar opciones equivalentes al extractor de features: `--search-radius`, `--dem-size`, `--vehicle-track`, `--sampling`.
 
+### Segment visualization
+
+Guia completa: `docs/guides/SEGMENT_VISUALIZATION_GUIDE.md`
+
+Archivos:
+- `src/lidar_stability/visualization/cli.py`
+- `src/lidar_stability/visualization/visualize_segment.py`
+
 ## ML
 
 ### Train baseline w model

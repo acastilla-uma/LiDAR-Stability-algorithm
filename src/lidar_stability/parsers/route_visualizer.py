@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from pyproj import Transformer
 
 try:
     import folium
@@ -22,6 +23,9 @@ try:
 except ImportError:
     HAS_FOLIUM = False
     print("folium no instalado. Instala con: pip install folium")
+
+
+_WGS84_TO_WEB_MERCATOR = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
 
 def si_to_color(si_value):
@@ -56,6 +60,12 @@ def si_to_color(si_value):
         b = 0
     
     return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def _to_web_mercator(lat, lon):
+    """Convert WGS84 coordinates to Web Mercator meters."""
+    x_3857, y_3857 = _WGS84_TO_WEB_MERCATOR.transform(float(lon), float(lat))
+    return x_3857, y_3857
 
 
 def load_route_data(csv_path):
@@ -152,19 +162,29 @@ def build_map(segments_data, output_path):
         for i in range(len(coords) - 1):
             si_value = si_values[i]
             color = si_to_color(si_value)
+            start_x, start_y = _to_web_mercator(coords[i][0], coords[i][1])
+            end_x, end_y = _to_web_mercator(coords[i + 1][0], coords[i + 1][1])
             folium.PolyLine(
                 [coords[i], coords[i + 1]],
                 color=color,
                 weight=4,
                 opacity=0.85,
-                popup=f"{segment_name}<br>SI: {si_value:.3f}",
+                popup=(
+                    f"{segment_name}<br>SI: {si_value:.3f}<br>"
+                    f"Start EPSG:3857: X={start_x:.2f}, Y={start_y:.2f}<br>"
+                    f"End EPSG:3857: X={end_x:.2f}, Y={end_y:.2f}"
+                ),
             ).add_to(m)
 
         # Mark start and end of each segment
         folium.CircleMarker(
             location=[df["lat"].iloc[0], df["lon"].iloc[0]],
             radius=5,
-            popup=f"Inicio {segment_name}",
+            popup=(
+                f"Inicio {segment_name}<br>"
+                f"EPSG:3857: X={_to_web_mercator(df['lat'].iloc[0], df['lon'].iloc[0])[0]:.2f}, "
+                f"Y={_to_web_mercator(df['lat'].iloc[0], df['lon'].iloc[0])[1]:.2f}"
+            ),
             color="green",
             fill=True,
             fillColor="green",
@@ -173,7 +193,11 @@ def build_map(segments_data, output_path):
         folium.CircleMarker(
             location=[df["lat"].iloc[-1], df["lon"].iloc[-1]],
             radius=5,
-            popup=f"Final {segment_name}",
+            popup=(
+                f"Final {segment_name}<br>"
+                f"EPSG:3857: X={_to_web_mercator(df['lat'].iloc[-1], df['lon'].iloc[-1])[0]:.2f}, "
+                f"Y={_to_web_mercator(df['lat'].iloc[-1], df['lon'].iloc[-1])[1]:.2f}"
+            ),
             color="red",
             fill=True,
             fillColor="red",
