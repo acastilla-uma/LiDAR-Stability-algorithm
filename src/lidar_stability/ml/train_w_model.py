@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import sklearn
 from joblib import dump
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -20,7 +21,11 @@ SRC_ROOT = SCRIPT_DIR.parent.parent
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from lidar_stability.ml.feature_engineering import build_w_training_dataset, load_featured_data
+from lidar_stability.ml.feature_engineering import (
+    DEFAULT_FEATURE_UNITS,
+    build_w_training_dataset,
+    load_featured_data,
+)
 
 
 def train_rf_kfold(X, y, n_splits: int, random_state: int):
@@ -85,6 +90,12 @@ def parse_args():
         default='gy',
         help="Explicit target column (must be 'gy').",
     )
+    parser.add_argument(
+        '--target-unit',
+        choices=['deg_s', 'rad_s'],
+        default='deg_s',
+        help='Physical unit of the gy training target.',
+    )
     parser.add_argument('--n-splits', type=int, default=5, help='Number of KFold splits')
     parser.add_argument('--random-state', type=int, default=42)
     parser.add_argument(
@@ -129,22 +140,33 @@ def main() -> int:
     artifact = {
         'model': model,
         'feature_columns': used_features,
+        'feature_order': list(used_features),
+        'feature_units': {col: DEFAULT_FEATURE_UNITS.get(col, 'unknown') for col in used_features},
         'target_name': 'gy',
+        'target_unit': args.target_unit,
+        'prediction_unit': args.target_unit,
+        'split_metadata': {'kind': 'row', 'group_by': 'row', 'n_splits': max(2, int(args.n_splits))},
+        'sklearn_version': sklearn.__version__,
     }
     dump(artifact, model_path)
 
     metrics_payload = {
         **summary,
         'feature_columns': used_features,
+        'feature_order': list(used_features),
         'input_glob': args.input_glob,
         'target_column': args.target_column,
+        'target_unit': args.target_unit,
+        'prediction_unit': args.target_unit,
+        'split_metadata': {'kind': 'row', 'group_by': 'row', 'n_splits': max(2, int(args.n_splits))},
+        'sklearn_version': sklearn.__version__,
     }
     metrics_path.write_text(json.dumps(metrics_payload, indent=2), encoding='utf-8')
 
     print('Training completed')
     print(f"  samples={summary['n_samples']} features={summary['n_features']}")
-    print(f"  RMSE(mean+-std)={summary['rmse_mean']:.6f} +- {summary['rmse_std']:.6f} rad/s")
-    print(f"  MAE(mean+-std)={summary['mae_mean']:.6f} +- {summary['mae_std']:.6f} rad/s")
+    print(f"  RMSE(mean+-std)={summary['rmse_mean']:.6f} +- {summary['rmse_std']:.6f} {args.target_unit}")
+    print(f"  MAE(mean+-std)={summary['mae_mean']:.6f} +- {summary['mae_std']:.6f} {args.target_unit}")
     print(f"  R2(mean+-std)={summary['r2_mean']:.4f} +- {summary['r2_std']:.4f}")
     print(f'  model: {model_path}')
     print(f'  metrics: {metrics_path}')
@@ -154,4 +176,3 @@ def main() -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

@@ -6,7 +6,7 @@ Busca recursivamente subcarpetas bajo `root_dir` (por defecto `output/models`) y
 o `_history.json`. Guarda tres gráficas de barras en `out_dir`.
 
 Uso:
-    python tmp/compare_models_metrics.py --root output/models --out tmp/figs
+    python src/lidar_stability/visualization/compare_models_metrics.py --root output/models --out output/model_metrics_figs
 
 """
 from __future__ import annotations
@@ -194,7 +194,7 @@ def plot_metric(df: pd.DataFrame, metric: str, out_path: Path, ascending: bool =
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', default='output/models', help='Carpeta raíz donde buscar modelos')
-    parser.add_argument('--out', default='src/lidar_stability/tmp/figs', help='Carpeta donde guardar las gráficas')
+    parser.add_argument('--out', default='output/model_metrics_figs', help='Carpeta donde guardar las gráficas')
     parser.add_argument('--show', action='store_true', help='Mostrar las figuras además de guardarlas')
     args = parser.parse_args()
 

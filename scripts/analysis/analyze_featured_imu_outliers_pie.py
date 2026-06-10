@@ -200,7 +200,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("tmp/imu_outlier_analysis"),
+        default=Path("output/imu_outlier_analysis"),
         help="Directory where the PNG and CSV summary will be written.",
     )
     return parser.parse_args()

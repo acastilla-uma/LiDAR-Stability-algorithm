@@ -19,6 +19,18 @@ DEFAULT_FEATURE_COLUMNS = [
     'ruggedness',
 ]
 
+DEFAULT_FEATURE_UNITS = {
+    'roll': 'deg',
+    'pitch': 'deg',
+    'ax': 'm_s2',
+    'ay': 'm_s2',
+    'az': 'm_s2',
+    'speed_kmh': 'km_h',
+    'phi_lidar': 'rad',
+    'tri': 'dimensionless',
+    'ruggedness': 'dimensionless',
+}
+
 DEFAULT_TARGET_COLUMN = 'gy'
 
 

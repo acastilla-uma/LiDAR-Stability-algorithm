@@ -2,6 +2,7 @@
 Doback-Data/
 LiDAR-Maps/
 cache/
+tmp/
 
 # Heavy geospatial formats
 *.laz
@@ -18,3 +19,4 @@ cache/
 # Output artifacts
 output/
 Scripts/output/
+src/lidar_stability/tmp/

@@ -19,6 +19,7 @@ from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd
+import sklearn
 from joblib import dump
 from sklearn.ensemble import ExtraTreesRegressor, GradientBoostingRegressor, RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -35,7 +36,11 @@ SRC_ROOT = SCRIPT_DIR.parent.parent
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from lidar_stability.ml.feature_engineering import DEFAULT_FEATURE_COLUMNS, build_w_training_dataset
+from lidar_stability.ml.feature_engineering import (
+    DEFAULT_FEATURE_COLUMNS,
+    DEFAULT_FEATURE_UNITS,
+    build_w_training_dataset,
+)
 
 
 @dataclass
@@ -46,28 +51,48 @@ class TrialResult:
     model: str
     params: dict
     objective_value: float | None
-    trial_duration_seconds: float | None
-    cv_r2_mean: float
-    cv_r2_std: float
-    cv_r2_min: float
-    cv_r2_max: float
-    cv_rmse_mean: float
-    cv_rmse_min: float
-    cv_rmse_max: float
-    cv_mae_mean: float
-    cv_mae_min: float
-    cv_mae_max: float
-    cv_fold_r2s: list[float]
-    cv_fold_rmses: list[float]
-    cv_fold_maes: list[float]
-    holdout_r2: float | None
-    holdout_rmse: float | None
-    holdout_mae: float | None
-    holdout_residual_mean: float | None
-    holdout_residual_std: float | None
-    holdout_abs_residual_mean: float | None
-    generalization_gap: float | None
-    is_feasible: bool
+    trial_duration_seconds: float | None = None
+    cv_r2_mean: float = float("nan")
+    cv_r2_std: float = float("nan")
+    cv_r2_min: float | None = None
+    cv_r2_max: float | None = None
+    cv_rmse_mean: float = float("nan")
+    cv_rmse_min: float | None = None
+    cv_rmse_max: float | None = None
+    cv_mae_mean: float = float("nan")
+    cv_mae_min: float | None = None
+    cv_mae_max: float | None = None
+    cv_fold_r2s: list[float] | None = None
+    cv_fold_rmses: list[float] | None = None
+    cv_fold_maes: list[float] | None = None
+    holdout_r2: float | None = None
+    holdout_rmse: float | None = None
+    holdout_mae: float | None = None
+    holdout_residual_mean: float | None = None
+    holdout_residual_std: float | None = None
+    holdout_abs_residual_mean: float | None = None
+    generalization_gap: float | None = None
+    is_feasible: bool = False
+
+    def __post_init__(self) -> None:
+        if self.cv_fold_r2s is None:
+            self.cv_fold_r2s = []
+        if self.cv_fold_rmses is None:
+            self.cv_fold_rmses = []
+        if self.cv_fold_maes is None:
+            self.cv_fold_maes = []
+        if self.cv_r2_min is None:
+            self.cv_r2_min = self.cv_r2_mean
+        if self.cv_r2_max is None:
+            self.cv_r2_max = self.cv_r2_mean
+        if self.cv_rmse_min is None:
+            self.cv_rmse_min = self.cv_rmse_mean
+        if self.cv_rmse_max is None:
+            self.cv_rmse_max = self.cv_rmse_mean
+        if self.cv_mae_min is None:
+            self.cv_mae_min = self.cv_mae_mean
+        if self.cv_mae_max is None:
+            self.cv_mae_max = self.cv_mae_mean
 
 
 SOURCE_FILE_COLUMN = "__source_file"
@@ -154,6 +179,12 @@ def parse_args() -> argparse.Namespace:
         "--target-column",
         default="gy",
         help="Explicit target column (must be 'gy').",
+    )
+    parser.add_argument(
+        "--target-unit",
+        choices=["deg_s", "rad_s"],
+        default="deg_s",
+        help="Physical unit of the gy training target.",
     )
     parser.add_argument(
         "--feature-columns",
@@ -615,6 +646,7 @@ def build_cv_splits(
     train_groups: pd.Series | None,
     n_splits: int,
     random_state: int,
+    cv_group_by: str | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Build cross-validation split index pairs.
 
@@ -940,7 +972,15 @@ def run_search(args: argparse.Namespace) -> int:
     print(f"Samples after cleaning: {len(X)} | train={len(X_train)} holdout={len(X_hold)}")
     print(f"Used features ({len(used_features)}): {used_features}")
 
+    target_unit = getattr(args, "target_unit", "deg_s")
     selected_files_rel = [str(p.relative_to(repo_root)) for p in csv_paths]
+    split_metadata = {
+        "kind": "grouped",
+        "group_by": SOURCE_FILE_COLUMN,
+        "holdout_frac": float(args.holdout_frac),
+        "n_splits": max(2, int(args.n_splits)),
+    }
+    feature_units = {col: DEFAULT_FEATURE_UNITS.get(col, "unknown") for col in used_features}
     training_context = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "repo_root": str(repo_root),
@@ -953,6 +993,12 @@ def run_search(args: argparse.Namespace) -> int:
         "resolved_target_name": "gy",
         "resolved_feature_columns": list(used_features),
         "feature_resolution_mode": feature_resolution_mode,
+        "cv_group_by": SOURCE_FILE_COLUMN,
+        "split_policy": split_metadata,
+        "target_unit": target_unit,
+        "prediction_unit": target_unit,
+        "feature_units": feature_units,
+        "sklearn_version": sklearn.__version__,
     }
 
     objective = objective_factory(
@@ -1056,8 +1102,12 @@ def run_search(args: argparse.Namespace) -> int:
     artifact = {
         "model": best_model_obj,
         "feature_columns": used_features,
+        "feature_order": list(used_features),
+        "feature_units": feature_units,
         "target_name": "gy",
         "target_column_input": args.target_column,
+        "target_unit": target_unit,
+        "prediction_unit": target_unit,
         "model_key": args.model,
         "run_id": f"adaptive_target_{str(args.target_r2).replace('.', '_')}",
         "params": dict(best.params),
@@ -1066,6 +1116,8 @@ def run_search(args: argparse.Namespace) -> int:
         "n_holdout_samples": int(len(X_hold)),
         "n_search_rows": int(len(X)),
         "n_features": int(len(used_features)),
+        "split_metadata": split_metadata,
+        "sklearn_version": sklearn.__version__,
         "training_context": training_context,
         "search_engine": "optuna",
         "search_best": serialize_trial_result(best),
@@ -1100,8 +1152,14 @@ def run_search(args: argparse.Namespace) -> int:
             "n_holdout_samples": int(len(X_hold)),
             "n_features": int(len(used_features)),
             "feature_columns": list(used_features),
+            "feature_order": list(used_features),
             "target_name": "gy",
             "target_column_input": args.target_column,
+            "target_unit": target_unit,
+            "prediction_unit": target_unit,
+            "feature_units": feature_units,
+            "split_metadata": split_metadata,
+            "sklearn_version": sklearn.__version__,
         },
         "n_trials": int(len(study.trials)),
         "n_completed_trials": int(len(history)),
@@ -1135,7 +1193,13 @@ def run_search(args: argparse.Namespace) -> int:
                 "n_features": int(len(used_features)),
                 "params": dict(h.params),
                 "feature_columns": list(used_features),
+                "feature_order": list(used_features),
                 "target_name": "gy",
+                "target_unit": target_unit,
+                "prediction_unit": target_unit,
+                "feature_units": feature_units,
+                "split_metadata": split_metadata,
+                "sklearn_version": sklearn.__version__,
                 "model_path": str(model_path),
                 "metrics_path": str(history_path),
                 "report_path": "",
@@ -1154,9 +1218,8 @@ def run_search(args: argparse.Namespace) -> int:
         hold_df["residual"] = hold_df["y_true"] - hold_df["y_pred"]
         hold_df["abs_residual"] = np.abs(hold_df["residual"]).astype(float)
         hold_df.to_csv(holdout_path, index=False)
-    except Exception:
-        # Non-fatal: ensure search still completes even if saving holdout fails
-        pass
+    except OSError as exc:
+        print(f"Warning: failed to save holdout predictions to {holdout_path}: {exc}", file=sys.stderr)
 
     print("\nBest trial summary")
     print(

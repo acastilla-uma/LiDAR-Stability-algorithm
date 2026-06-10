@@ -15,6 +15,7 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+import sklearn
 from joblib import dump
 from sklearn.ensemble import ExtraTreesRegressor, GradientBoostingRegressor, RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -25,7 +26,7 @@ SRC_ROOT = SCRIPT_DIR.parent.parent
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from lidar_stability.ml.feature_engineering import build_w_training_dataset
+from lidar_stability.ml.feature_engineering import DEFAULT_FEATURE_UNITS, build_w_training_dataset
 
 
 @dataclass
@@ -109,6 +110,12 @@ def parse_args() -> argparse.Namespace:
         "--target-column",
         default="gy",
         help="Explicit target column (must be 'gy').",
+    )
+    parser.add_argument(
+        "--target-unit",
+        choices=["deg_s", "rad_s"],
+        default="deg_s",
+        help="Physical unit of the gy training target.",
     )
     parser.add_argument(
         "--feature-columns",
@@ -625,6 +632,7 @@ def main() -> int:
     )
     clean_df = df.loc[X.index].copy()
     cv_groups = resolve_cv_groups(clean_df, args.cv_group_by)
+    n_splits = max(2, int(args.n_splits))
 
     selected_files_rel = [str(p.relative_to(repo_root)) for p in csv_paths]
     training_context = {
@@ -637,9 +645,17 @@ def main() -> int:
         "resolved_target_name": "gy",
         "resolved_feature_columns": list(used_features),
         "cv_group_by": args.cv_group_by,
+        "split_policy": {
+            "kind": "grouped" if args.cv_group_by != "row" else "row",
+            "group_by": args.cv_group_by,
+            "n_splits": n_splits,
+        },
+        "target_unit": args.target_unit,
+        "prediction_unit": args.target_unit,
+        "feature_units": {col: DEFAULT_FEATURE_UNITS.get(col, "unknown") for col in used_features},
+        "sklearn_version": sklearn.__version__,
     }
 
-    n_splits = max(2, int(args.n_splits))
     split_indices = build_cv_splits(
         X,
         n_splits=n_splits,
@@ -708,7 +724,11 @@ def main() -> int:
         artifact = {
             "model": model,
             "feature_columns": used_features,
+            "feature_order": list(used_features),
+            "feature_units": training_context["feature_units"],
             "target_name": "gy",
+            "target_unit": args.target_unit,
+            "prediction_unit": args.target_unit,
             "model_key": model_key,
             "run_id": run_id,
             "params": effective_hyperparams,
@@ -716,6 +736,8 @@ def main() -> int:
             "n_features": result.n_features,
             "metrics": metrics_summary,
             "folds": result.folds,
+            "split_metadata": training_context["split_policy"],
+            "sklearn_version": sklearn.__version__,
             "training_context": training_context,
         }
         if compact_output:
@@ -735,7 +757,11 @@ def main() -> int:
             "cv_group_by": args.cv_group_by,
             "target_column": args.target_column,
             "target_name": "gy",
+            "target_unit": args.target_unit,
+            "prediction_unit": args.target_unit,
             "feature_columns": used_features,
+            "feature_order": list(used_features),
+            "feature_units": training_context["feature_units"],
             "kfold": n_splits,
             "n_samples": result.n_samples,
             "n_features": result.n_features,
@@ -746,6 +772,8 @@ def main() -> int:
             "r2_mean": result.r2_mean,
             "r2_std": result.r2_std,
             "folds": result.folds,
+            "split_metadata": training_context["split_policy"],
+            "sklearn_version": sklearn.__version__,
             "params": effective_hyperparams,
             "model_path": str(model_path),
             "artifact_key": artifact_key,
@@ -773,8 +801,13 @@ def main() -> int:
                 "n_features": result.n_features,
                 "params": effective_hyperparams,
                 "feature_columns": list(used_features),
+                "feature_order": list(used_features),
                 "target_name": "gy",
+                "target_unit": args.target_unit,
+                "prediction_unit": args.target_unit,
                 "cv_group_by": args.cv_group_by,
+                "split_metadata": training_context["split_policy"],
+                "sklearn_version": sklearn.__version__,
                 "model_path": str(model_path),
                 "metrics_path": str(metrics_path),
                 "training_context": training_context,
